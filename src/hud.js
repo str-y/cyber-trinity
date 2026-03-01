@@ -205,7 +205,9 @@ export class HUD {
     if (what) what.textContent = feature.action.toUpperCase();
     if (status) {
       status.textContent = feature.completed ? 'COMPLETED' : 'PENDING';
-      status.className = feature.completed ? 'green' : 'blue';
+      status.className = feature.completed
+        ? 'feature-status-completed'
+        : 'feature-status-pending';
     }
   }
 }

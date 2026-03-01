@@ -319,3 +319,6 @@ html, body {
   font-weight: bold;
   color: #a0d4ff;
 }
+
+.feature-status-pending { color: #4aa8ff !important; }
+.feature-status-completed { color: #50ff78 !important; }

@@ -52,7 +52,7 @@ void ACyberTrinityGameState::AddScore(EFaction Faction, int32 Points)
 
         const FText Msg = FText::Format(
             NSLOCTEXT("CyberTrinity", "NextFeatureComplete",
-                "{0} completed OVERCLOCK UPLINK (+{1})"),
+                "{0} completed ACTIVATE OVERCLOCK UPLINK (+{1})"),
             UEnum::GetDisplayValueAsText(Faction),
             FText::AsNumber(NextFeatureBonusScore)
         );

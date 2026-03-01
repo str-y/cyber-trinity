@@ -64,6 +64,7 @@ public:
 
     // ── Next feature contract ───────────────────────────────────────────────
 
+    // Archive maps to Blue in the browser preview implementation.
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
     EFaction NextFeatureFaction = EFaction::Archive;
 
