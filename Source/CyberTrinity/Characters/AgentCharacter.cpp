@@ -43,6 +43,12 @@ void AAgentCharacter::Tick(float DeltaTime)
         AbilityCooldownRemaining = FMath::Max(0.f, AbilityCooldownRemaining - DeltaTime);
     }
 
+    // Energy regeneration
+    if (IsAlive() && Energy < MaxEnergy)
+    {
+        Energy = FMath::Min(MaxEnergy, Energy + EnergyRegenRate * DeltaTime);
+    }
+
     // Keep carried crystal glued to agent's hand socket
     if (CarriedCrystal)
     {
@@ -126,10 +132,27 @@ void AAgentCharacter::Die(AAgentCharacter* Killer)
 void AAgentCharacter::Respawn(const FVector& SpawnLocation)
 {
     Health = MaxHealth;
+    Energy = MaxEnergy;
     SetActorLocation(SpawnLocation);
     SetActorHiddenInGame(false);
     GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+// ── Ability ───────────────────────────────────────────────────────────────────
+
+bool AAgentCharacter::TryActivateAbility()
+{
+    if (!IsAlive()) return false;
+    if (AbilityCooldownRemaining > 0.f) return false;
+    if (Energy < AbilityEnergyCost) return false;
+
+    Energy -= AbilityEnergyCost;
+    AbilityCooldownRemaining = AbilityCooldownMax;
+
+    // Dispatch to faction-specific Blueprint implementation
+    ActivateSpecialAbility();
+    return true;
 }
 
 // ── Crystal ───────────────────────────────────────────────────────────────────

@@ -80,11 +80,24 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Ability")
     void ActivateSpecialAbility();
 
+    /**
+     * Attempt to activate the faction ability if cooldown is ready and
+     * energy is sufficient.  Returns true on success.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Ability")
+    bool TryActivateAbility();
+
     UFUNCTION(BlueprintPure, Category = "Ability")
     float GetAbilityCooldownRemaining() const { return AbilityCooldownRemaining; }
 
     UFUNCTION(BlueprintPure, Category = "Ability")
     float GetAbilityCooldownMax() const { return AbilityCooldownMax; }
+
+    UFUNCTION(BlueprintPure, Category = "Ability")
+    float GetEnergy() const { return Energy; }
+
+    UFUNCTION(BlueprintPure, Category = "Ability")
+    float GetMaxEnergy() const { return MaxEnergy; }
 
     // ── Neon armour visuals ───────────────────────────────────────────────
 
@@ -119,6 +132,19 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability")
     float AbilityCooldownMax = 8.f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Ability")
+    float Energy = 100.f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability")
+    float MaxEnergy = 100.f;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability")
+    float AbilityEnergyCost = 30.f;
+
+    /** Energy regenerated per second while alive. */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability")
+    float EnergyRegenRate = 8.f;
 
 private:
     UPROPERTY()

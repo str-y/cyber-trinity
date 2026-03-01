@@ -41,6 +41,7 @@ export const FACTIONS = {
 export const PLAYER_RADIUS = 9;
 export const BASE_RADIUS   = 52;
 export const CRYSTAL_RADIUS = 6;
+export const ABILITY_RANGE  = 160;
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
@@ -103,9 +104,9 @@ export class Player {
 
     // Per-faction speed / aggro
     switch (faction) {
-      case 'red':  this.speed = 85; this.aggro = 0.85; break;
-      case 'blue': this.speed = 55; this.aggro = 0.55; break;
-      case 'green':this.speed = 62; this.aggro = 0.45; break;
+      case 'red':  this.speed = 85; this.aggro = 0.85; this.abilityName = 'Power Dash'; this.abilityCost = 30; break;
+      case 'blue': this.speed = 55; this.aggro = 0.55; this.abilityName = 'Railshot';   this.abilityCost = 25; break;
+      case 'green':this.speed = 62; this.aggro = 0.45; this.abilityName = 'Bio Shield'; this.abilityCost = 35; break;
     }
   }
 
@@ -239,6 +240,47 @@ export class Player {
     if (this.trailPoints.length > 16) this.trailPoints.shift();
     for (const p of this.trailPoints) p.a *= 0.88;
   }
+
+  /**
+   * Attempt to fire the faction ability.
+   * Returns a Projectile or null if conditions aren't met.
+   */
+  tryAbility(world) {
+    if (this.cooldown > 0 || this.energy < this.abilityCost || !this.alive) return null;
+
+    const enemy = world._nearestEnemy(this.x, this.y, this.faction);
+    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
+
+    // Consume energy & start cooldown
+    this.energy  -= this.abilityCost;
+    this.cooldown = this.abilityMax;
+
+    const dx = enemy.x - this.x;
+    const dy = enemy.y - this.y;
+    const [nx, ny] = normalise(dx, dy);
+
+    let proj;
+    switch (this.faction) {
+      case 'blue': {
+        // Railshot — fast long-range bolt
+        proj = new Projectile(this.x, this.y, nx * 420, ny * 420, 'blue', 'railshot', 35);
+        break;
+      }
+      case 'green': {
+        // Bio Shield — stationary heal aura centred on self
+        proj = new Projectile(this.x, this.y, 0, 0, 'green', 'bioshield', 0);
+        proj.owner = this;
+        break;
+      }
+      case 'red': {
+        // Power Dash — charge toward enemy
+        proj = new Projectile(this.x, this.y, nx * 280, ny * 280, 'red', 'powerdash', 25);
+        proj.owner = this;
+        break;
+      }
+    }
+    return proj;
+  }
 }
 
 // ── MemoryCrystal ─────────────────────────────────────────────────────────────
@@ -296,6 +338,35 @@ export class Particle {
       return new Particle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, color, randRange(0.4, 1.2));
     });
   }
+}
+
+// ── Projectile (ability effects) ──────────────────────────────────────────────
+
+export class Projectile {
+  constructor(x, y, vx, vy, faction, type, damage) {
+    this.x      = x;
+    this.y      = y;
+    this.vx     = vx;
+    this.vy     = vy;
+    this.faction = faction;
+    this.type   = type;   // 'railshot' | 'bioshield' | 'powerdash'
+    this.damage = damage;
+    this.life   = type === 'bioshield' ? 2.5 : 0.8;
+    this.maxLife = this.life;
+    this.radius = type === 'bioshield' ? 50 : type === 'powerdash' ? 12 : 4;
+    this.hit    = false;
+    this.owner  = null;   // set by caller
+  }
+
+  update(dt) {
+    this.x    += this.vx * dt;
+    this.y    += this.vy * dt;
+    this.life -= dt;
+  }
+
+  get dead() { return this.life <= 0 || this.hit; }
+
+  get alpha() { return Math.max(0, this.life / this.maxLife); }
 }
 
 // ── RainDrop ──────────────────────────────────────────────────────────────────
