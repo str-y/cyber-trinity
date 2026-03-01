@@ -3,7 +3,7 @@
  * Main game world — state management, update loop, entity spawning.
  */
 
-import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS } from './entities.js';
+import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS, PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS } from './entities.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 
@@ -73,6 +73,10 @@ export class Game {
 
     // Active faction buffs: { blue: { speedMult, regenMult, … , timer }, … }
     this.factionBuffs = {};
+    this.localPlayer = null;
+    this.input = { up: false, down: false, left: false, right: false, ability: false };
+    this._abilityLatch = false;
+    this._bindInput();
   }
 
   // ── Feature contract accessor (used by HUD and renderer) ─────────────────
@@ -125,6 +129,8 @@ export class Game {
         this.players.push(p);
       }
     }
+    this.localPlayer = this.players.find(p => p.faction === 'blue') ?? null;
+    if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
 
     // ── Memory crystals ───────────────────────────────────────────────────
     for (let i = 0; i < CRYSTAL_COUNT; i++) {
@@ -143,6 +149,18 @@ export class Game {
 
     // ── Data stream particles ─────────────────────────────────────────────
     this._initDataStreams();
+  }
+
+  _bindInput() {
+    const setKey = (code, down) => {
+      if (code === 'KeyW' || code === 'ArrowUp') this.input.up = down;
+      if (code === 'KeyS' || code === 'ArrowDown') this.input.down = down;
+      if (code === 'KeyA' || code === 'ArrowLeft') this.input.left = down;
+      if (code === 'KeyD' || code === 'ArrowRight') this.input.right = down;
+      if (code === 'Space') this.input.ability = down;
+    };
+    window.addEventListener('keydown', e => setKey(e.code, true));
+    window.addEventListener('keyup',   e => setKey(e.code, false));
   }
 
   _positionBases() {
@@ -207,7 +225,8 @@ export class Game {
 
     // Players
     for (const player of this.players) {
-      player.update(dt, this);
+      if (player.isPlayerControlled) this._updateLocalPlayer(player, dt);
+      else player.update(dt, this);
       // Energy regeneration (buffed by faction overclock)
       if (player.alive && player.energy < 100) {
         const regenMult = this.factionBuffs[player.faction]?.regenMult ?? 1;
@@ -222,6 +241,23 @@ export class Game {
 
     // Ability firing (AI triggers periodically)
     for (const player of this.players) {
+      if (player.isPlayerControlled) {
+        if (this.input.ability && !this._abilityLatch) {
+          this._abilityLatch = true;
+          const proj = player.tryAbility(this);
+          if (proj) {
+            this.projectiles.push(proj);
+            this.events.push({
+              text: `${player.faction.toUpperCase()} fired ${player.abilityName.toUpperCase()}`,
+              faction: player.faction,
+              ttl: 2,
+            });
+          }
+        } else if (!this.input.ability) {
+          this._abilityLatch = false;
+        }
+        continue;
+      }
       if (player.alive && Math.random() < AI_ABILITY_CHANCE) {
         const proj = player.tryAbility(this);
         if (proj) {
@@ -289,6 +325,66 @@ export class Game {
         base.x + (Math.random() - 0.5) * 60,
         base.y + (Math.random() - 0.5) * 60,
         FACTIONS[f].color, 4));
+    }
+  }
+
+  _updateLocalPlayer(player, dt) {
+    player.glowPulse += dt * 2.2;
+    if (!player.alive) {
+      player.respawnTimer -= dt;
+      if (player.respawnTimer <= 0) {
+        player.alive = true;
+        player.health = player.maxHealth;
+        const base = this.bases[player.faction];
+        player.x = base.x + (Math.random() - 0.5) * 60;
+        player.y = base.y + (Math.random() - 0.5) * 60;
+        player.carrying = null;
+      }
+      return;
+    }
+
+    if (player.cooldown > 0) player.cooldown = Math.max(0, player.cooldown - dt);
+
+    const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+    const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    const speedMult = this.factionBuffs?.[player.faction]?.speedMult ?? 1;
+    const effSpeed = player.speed * speedMult;
+    if (dx !== 0 || dy !== 0) {
+      const len = Math.hypot(dx, dy) || 1;
+      player.vx = (dx / len) * effSpeed;
+      player.vy = (dy / len) * effSpeed;
+    } else {
+      player.vx *= 0.82;
+      player.vy *= 0.82;
+    }
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+    player.x = Math.max(PLAYER_RADIUS, Math.min(this.width - PLAYER_RADIUS, player.x));
+    player.y = Math.max(PLAYER_RADIUS, Math.min(this.height - PLAYER_RADIUS, player.y));
+    player._updateTrail();
+
+    if (player.carrying) {
+      const base = this.bases[player.faction];
+      if (Math.hypot(player.x - base.x, player.y - base.y) < BASE_RADIUS - 5) {
+        base.crystalsStored++;
+        this.scores[player.faction] += 10;
+        this.events.push({
+          text: `${player.faction.toUpperCase()} PLAYER delivered CRYSTAL (+10)`,
+          faction: player.faction,
+          ttl: 3,
+        });
+        player.carrying.delivered = true;
+        player.carrying = null;
+      }
+      return;
+    }
+
+    const nearest = this._nearestFreeCrystal(player.x, player.y);
+    if (!nearest) return;
+    const d = Math.hypot(player.x - nearest.x, player.y - nearest.y);
+    if (d < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
+      nearest.carrier = player;
+      player.carrying = nearest;
     }
   }
 

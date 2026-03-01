@@ -446,6 +446,26 @@ export class Renderer {
     ctx.fillStyle   = f.color;
     ctx.fillRect(-hpW / 2, hpY, hpW * (player.health / player.maxHealth), 3);
 
+    // Local operator marker + equipped item
+    if (player.isPlayerControlled) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, PLAYER_RADIUS + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('YOU', 0, -PLAYER_RADIUS - 8);
+    }
+
+    const itemByFaction = { blue: 'RIFLE', green: 'SHIELD', red: 'FIST' };
+    const itemLabel = itemByFaction[player.faction] ?? 'ITEM';
+    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+    ctx.font = 'bold 8px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(itemLabel, 0, PLAYER_RADIUS + 16);
+
     ctx.restore();
   }
 
