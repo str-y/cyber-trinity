@@ -366,11 +366,11 @@ export class Game {
           timer: feature.visualDuration,
         };
       }
-
-      // Advance to the next contract once the visual finishes
     }
 
-    // Move to next contract once visual is done
+    // Advance past the completed contract once its visual timer expires.
+    // When featureIndex exceeds the array length, nextFeature returns null
+    // and the HUD shows "ALL CONTRACTS FULFILLED".
     if (feature.completed && feature.visualTimer <= 0 &&
         this.featureIndex < this.featureContracts.length) {
       this.featureIndex++;
