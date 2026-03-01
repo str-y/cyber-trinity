@@ -62,6 +62,27 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Match")
     int32 ScoreLimit = 200;
 
+    // ── Next feature contract ───────────────────────────────────────────────
+
+    // Archive maps to Blue in the browser preview implementation.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    EFaction NextFeatureFaction = EFaction::Archive;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    int32 NextFeatureTriggerScore = 100;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    int32 NextFeatureBonusScore = 15;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    FString NextFeatureActionName = TEXT("ACTIVATE OVERCLOCK UPLINK");
+
+    UPROPERTY(ReplicatedUsing = OnRep_NextFeatureCompleted, BlueprintReadOnly, Category = "Feature")
+    bool bNextFeatureCompleted = false;
+
+    UFUNCTION()
+    void OnRep_NextFeatureCompleted();
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:

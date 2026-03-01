@@ -10,6 +10,10 @@ import { HUD } from './hud.js';
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 10;
 const DATA_STREAM_COUNT = 30;
+const FEATURE_ACTION = 'Activate Overclock Uplink';
+const FEATURE_TRIGGER_SCORE = 100;
+const FEATURE_BONUS_SCORE = 15;
+const FEATURE_VISUAL_DURATION = 6;
 
 export class Game {
   constructor(canvas) {
@@ -31,6 +35,15 @@ export class Game {
     this.rain        = [];
     this.scores      = { blue: 30, green: 85, red: 55 };  // pre-seeded per spec
     this.events      = [];
+    this.nextFeature = {
+      actor: 'blue',               // who
+      triggerScore: FEATURE_TRIGGER_SCORE, // when
+      action: FEATURE_ACTION, // what
+      bonusScore: FEATURE_BONUS_SCORE,
+      completed: false,
+      visualTimer: 0,
+      visualDuration: FEATURE_VISUAL_DURATION,
+    };
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -164,6 +177,9 @@ export class Game {
     // Crystals
     for (const c of this.crystals) c.update(dt);
 
+    // Next feature contract (who/when/what + completion effects)
+    this._updateNextFeature(dt);
+
     // Re-spawn delivered crystals
     const active = this.crystals.filter(c => !c.delivered);
     if (active.length < CRYSTAL_COUNT * 0.5) {
@@ -209,6 +225,24 @@ export class Game {
         base.x + (Math.random() - 0.5) * 60,
         base.y + (Math.random() - 0.5) * 60,
         FACTIONS[f].color, 4));
+    }
+  }
+
+  _updateNextFeature(dt) {
+    const feature = this.nextFeature;
+    if (feature.visualTimer > 0) {
+      feature.visualTimer = Math.max(0, feature.visualTimer - dt);
+    }
+
+    if (!feature.completed && (this.scores[feature.actor] ?? 0) >= feature.triggerScore) {
+      feature.completed = true;
+      this.scores[feature.actor] += feature.bonusScore;
+      feature.visualTimer = feature.visualDuration;
+      this.events.push({
+        text: `${feature.actor.toUpperCase()} completed ${feature.action} (+${feature.bonusScore})`,
+        faction: feature.actor,
+        ttl: 3,
+      });
     }
   }
 
