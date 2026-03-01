@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CYBER TRINITY — 5v5v5 Data-Node Combat</title>
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <div id="game-container">
+
+    <!-- Main render surface -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Holographic HUD overlay -->
+    <div id="hud">
+
+      <!-- Scanline film grain -->
+      <div id="scanlines"></div>
+
+      <!-- Faction legend — top left -->
+      <div id="faction-legend"></div>
+
+      <!-- Team scores — top centre -->
+      <div id="score-panel"></div>
+
+      <!-- Crystal counter — top right -->
+      <div id="crystal-counter"></div>
+
+      <!-- Kill / event feed — below top-right -->
+      <div id="event-feed"></div>
+
+      <!-- Local agent status — bottom left -->
+      <div id="status-left"></div>
+
+      <!-- Ability / cooldown — bottom right -->
+      <div id="status-right"></div>
+
+    </div><!-- /hud -->
+
+  </div><!-- /game-container -->
+
+  <script type="module">
+    import { Game } from './src/game.js';
+    const canvas = document.getElementById('game-canvas');
+    const game   = new Game(canvas);
+    game.start();
+  </script>
+</body>
+</html>
