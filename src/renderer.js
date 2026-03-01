@@ -459,11 +459,8 @@ export class Renderer {
       ctx.fillText('YOU', 0, -PLAYER_RADIUS - 8);
     }
 
-    const itemLabel = player.faction === 'blue'
-      ? 'RIFLE'
-      : player.faction === 'green'
-        ? 'SHIELD'
-        : 'FIST';
+    const itemByFaction = { blue: 'RIFLE', green: 'SHIELD', red: 'FIST' };
+    const itemLabel = itemByFaction[player.faction] ?? 'ITEM';
     ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
