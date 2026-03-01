@@ -194,17 +194,30 @@ export class HUD {
 
   _updateFeature(world) {
     const feature = world.nextFeature;
-    if (!feature) return;
     const who = document.getElementById('feature-who');
     const when = document.getElementById('feature-when');
     const what = document.getElementById('feature-what');
     const status = document.getElementById('feature-status');
 
+    if (!feature) {
+      // All contracts fulfilled
+      if (who) who.textContent = '—';
+      if (when) when.textContent = '—';
+      if (what) what.textContent = 'ALL CONTRACTS FULFILLED';
+      if (status) { status.textContent = 'DONE'; status.className = 'feature-status-completed'; }
+      return;
+    }
+
     if (who) who.textContent = feature.actor.toUpperCase();
     if (when) when.textContent = `SCORE ≥ ${feature.triggerScore}`;
     if (what) what.textContent = feature.action.toUpperCase();
     if (status) {
-      status.textContent = feature.completed ? 'COMPLETED' : 'PENDING';
+      const buff = world.factionBuffs?.[feature.actor];
+      if (feature.completed && buff) {
+        status.textContent = `ACTIVE (${Math.ceil(buff.timer)}s)`;
+      } else {
+        status.textContent = feature.completed ? 'COMPLETED' : 'PENDING';
+      }
       status.className = feature.completed
         ? 'feature-status-completed'
         : 'feature-status-pending';

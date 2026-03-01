@@ -10,12 +10,37 @@ import { HUD } from './hud.js';
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 10;
 const DATA_STREAM_COUNT = 30;
-const FEATURE_ACTION = 'Activate Overclock Uplink';
-const FEATURE_TRIGGER_SCORE = 100;
-const FEATURE_BONUS_SCORE = 15;
-const FEATURE_VISUAL_DURATION = 6;
 const AI_ABILITY_CHANCE = 0.008;       // per-agent per-frame probability (~once every 12 s)
 const PROJECTILE_HIT_TOLERANCE = 4;    // extra px added to collision radii
+
+// Feature contract chain — each contract triggers when the actor reaches the score threshold.
+// On completion the actor receives a bonus and their agents receive a timed buff.
+const FEATURE_CONTRACTS = [
+  {
+    actor: 'blue',
+    triggerScore: 100,
+    action: 'Activate Overclock Uplink',
+    bonusScore: 15,
+    visualDuration: 6,
+    buff: { speedMult: 1.5, regenMult: 2.0 },
+  },
+  {
+    actor: 'green',
+    triggerScore: 120,
+    action: 'Deploy Firewall',
+    bonusScore: 15,
+    visualDuration: 6,
+    buff: { healPerSec: 8 },
+  },
+  {
+    actor: 'red',
+    triggerScore: 150,
+    action: 'Core Meltdown',
+    bonusScore: 15,
+    visualDuration: 6,
+    buff: { damageMult: 2.0 },
+  },
+];
 
 export class Game {
   constructor(canvas) {
@@ -38,15 +63,21 @@ export class Game {
     this.scores      = { blue: 30, green: 85, red: 55 };  // pre-seeded per spec
     this.events      = [];
     this.projectiles = [];
-    this.nextFeature = {
-      actor: 'blue',               // who
-      triggerScore: FEATURE_TRIGGER_SCORE, // when
-      action: FEATURE_ACTION, // what
-      bonusScore: FEATURE_BONUS_SCORE,
+    // Feature contract chain — current contract is featureContracts[featureIndex]
+    this.featureContracts = FEATURE_CONTRACTS.map(c => ({
+      ...c,
       completed: false,
       visualTimer: 0,
-      visualDuration: FEATURE_VISUAL_DURATION,
-    };
+    }));
+    this.featureIndex = 0;
+
+    // Active faction buffs: { blue: { speedMult, regenMult, … , timer }, … }
+    this.factionBuffs = {};
+  }
+
+  // ── Feature contract accessor (used by HUD and renderer) ─────────────────
+  get nextFeature() {
+    return this.featureContracts[this.featureIndex] ?? null;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -177,9 +208,15 @@ export class Game {
     // Players
     for (const player of this.players) {
       player.update(dt, this);
-      // Energy regeneration
+      // Energy regeneration (buffed by faction overclock)
       if (player.alive && player.energy < 100) {
-        player.energy = Math.min(100, player.energy + 8 * dt);
+        const regenMult = this.factionBuffs[player.faction]?.regenMult ?? 1;
+        player.energy = Math.min(100, player.energy + 8 * regenMult * dt);
+      }
+      // Faction heal-over-time buff (Deploy Firewall)
+      const healBuff = this.factionBuffs[player.faction]?.healPerSec;
+      if (player.alive && healBuff) {
+        player.health = Math.min(player.maxHealth, player.health + healBuff * dt);
       }
     }
 
@@ -299,7 +336,15 @@ export class Game {
   }
 
   _updateNextFeature(dt) {
+    // Tick down active faction buffs
+    for (const [faction, buff] of Object.entries(this.factionBuffs)) {
+      buff.timer -= dt;
+      if (buff.timer <= 0) delete this.factionBuffs[faction];
+    }
+
     const feature = this.nextFeature;
+    if (!feature) return;   // all contracts fulfilled
+
     if (feature.visualTimer > 0) {
       feature.visualTimer = Math.max(0, feature.visualTimer - dt);
     }
@@ -313,6 +358,22 @@ export class Game {
         faction: feature.actor,
         ttl: 3,
       });
+
+      // Apply timed buff to the completing faction
+      if (feature.buff) {
+        this.factionBuffs[feature.actor] = {
+          ...feature.buff,
+          timer: feature.visualDuration,
+        };
+      }
+
+      // Advance to the next contract once the visual finishes
+    }
+
+    // Move to next contract once visual is done
+    if (feature.completed && feature.visualTimer <= 0 &&
+        this.featureIndex < this.featureContracts.length) {
+      this.featureIndex++;
     }
   }
 

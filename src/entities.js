@@ -197,7 +197,9 @@ export class Player {
       const enemy = world._nearestEnemy(this.x, this.y, this.faction);
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
         this.attackTimer = 0.6;
-        const dmg = this.faction === 'red' ? 18 : this.faction === 'blue' ? 22 : 12;
+        const baseDmg = this.faction === 'red' ? 18 : this.faction === 'blue' ? 22 : 12;
+        const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
+        const dmg = baseDmg * dmgMult;
         enemy.health -= dmg;
         world.sparks.push(...Particle.burst(
           (this.x + enemy.x) / 2,
@@ -224,9 +226,11 @@ export class Player {
     const dx = tx - this.x, dy = ty - this.y;
     const d  = Math.sqrt(dx * dx + dy * dy);
     if (d < 2) return;
+    const speedMult = world.factionBuffs?.[this.faction]?.speedMult ?? 1;
+    const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
-    this.vx = lerp(this.vx, nx * this.speed, 0.12);
-    this.vy = lerp(this.vy, ny * this.speed, 0.12);
+    this.vx = lerp(this.vx, nx * effSpeed, 0.12);
+    this.vy = lerp(this.vy, ny * effSpeed, 0.12);
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 

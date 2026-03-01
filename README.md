@@ -106,6 +106,22 @@ python3 -m http.server 8080
 
 ---
 
+## Feature Contract Chain
+
+The game includes a progressive **feature contract** system. As factions reach score
+milestones, special contracts activate, granting a temporary faction-wide buff and a
+score bonus. The HUD panel in the top-right tracks the current contract.
+
+| # | Contract | Faction | Trigger | Buff | Bonus |
+|---|----------|---------|---------|------|-------|
+| 1 | **Activate Overclock Uplink** | 🔵 The Archive | Score ≥ 100 | 1.5× speed, 2× energy regen for 6 s | +15 |
+| 2 | **Deploy Firewall** | 🟢 Life Forge | Score ≥ 120 | +8 HP/s heal for 6 s | +15 |
+| 3 | **Core Meltdown** | 🔴 Core Protocol | Score ≥ 150 | 2× melee damage for 6 s | +15 |
+
+Once all three contracts are fulfilled the panel reads **ALL CONTRACTS FULFILLED**.
+
+---
+
 ## Faction Abilities
 
 Each faction has a unique active ability triggered by AI agents when their cooldown
