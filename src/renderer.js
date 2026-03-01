@@ -532,20 +532,42 @@ export class Renderer {
   _drawFeaturePulse(world) {
     const timer = world.nextFeature?.visualTimer ?? 0;
     if (timer <= 0) return;
-    const base = world.bases.blue;
+    const faction = world.nextFeature.actor;
+    const base = world.bases[faction];
     if (!base) return;
 
+    const f   = FACTIONS[faction];
+    const { r, g, b } = hexToRgb(f.color);
     const ctx = this.ctx;
     const pulse = 0.35 + 0.25 * Math.sin(this.time * 7);
     ctx.save();
-    ctx.strokeStyle = `rgba(74,168,255,${pulse})`;
+    ctx.strokeStyle = `rgba(${r},${g},${b},${pulse})`;
     ctx.lineWidth = 4;
     ctx.shadowBlur = 18;
-    ctx.shadowColor = '#4aa8ff';
+    ctx.shadowColor = f.color;
     ctx.beginPath();
     ctx.arc(base.x, base.y, BASE_RADIUS + 22, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+
+    // Draw buff indicator rings on buffed agents
+    for (const player of world.players) {
+      if (!player.alive) continue;
+      const buff = world.factionBuffs?.[player.faction];
+      if (!buff) continue;
+      const pf = FACTIONS[player.faction];
+      const pr = hexToRgb(pf.color);
+      const bAlpha = 0.3 + 0.3 * Math.sin(this.time * 8);
+      ctx.save();
+      ctx.strokeStyle = `rgba(${pr.r},${pr.g},${pr.b},${bAlpha})`;
+      ctx.lineWidth   = 2;
+      ctx.shadowBlur  = 10;
+      ctx.shadowColor = pf.color;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, PLAYER_RADIUS + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // ── Vignette ──────────────────────────────────────────────────────────────
