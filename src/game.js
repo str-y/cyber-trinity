@@ -37,6 +37,7 @@ export class Game {
     this.events      = [];
     this.nextFeature = {
       actor: 'blue',               // who
+      actorLabel: 'BLUE',
       triggerScore: FEATURE_TRIGGER_SCORE, // when
       action: FEATURE_ACTION, // what
       bonusScore: FEATURE_BONUS_SCORE,

@@ -200,7 +200,7 @@ export class HUD {
     const what = document.getElementById('feature-what');
     const status = document.getElementById('feature-status');
 
-    if (who) who.textContent = feature.actor.toUpperCase();
+    if (who) who.textContent = feature.actorLabel || feature.actor.toUpperCase();
     if (when) when.textContent = `SCORE ≥ ${feature.triggerScore}`;
     if (what) what.textContent = feature.action.toUpperCase();
     if (status) {
