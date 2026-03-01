@@ -81,6 +81,9 @@ export class Renderer {
     // ── Spark particles ────────────────────────────────────────────────────
     this._drawParticles(world.sparks);
 
+    // ── Feature completion visual pulse ────────────────────────────────────
+    this._drawFeaturePulse(world);
+
     // ── Vignette / atmospheric overlay ─────────────────────────────────────
     this._drawVignette(W, H);
   }
@@ -460,6 +463,25 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur  = 0;
+    ctx.restore();
+  }
+
+  _drawFeaturePulse(world) {
+    const timer = world.nextFeature?.visualTimer ?? 0;
+    if (timer <= 0) return;
+    const base = world.bases.blue;
+    if (!base) return;
+
+    const ctx = this.ctx;
+    const pulse = 0.35 + 0.25 * Math.sin(this.time * 7);
+    ctx.save();
+    ctx.strokeStyle = `rgba(74,168,255,${pulse})`;
+    ctx.lineWidth = 4;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = '#4aa8ff';
+    ctx.beginPath();
+    ctx.arc(base.x, base.y, BASE_RADIUS + 22, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 

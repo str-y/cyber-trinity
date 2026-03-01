@@ -85,6 +85,19 @@ export class HUD {
       <span style="opacity:0.55;font-size:9px;letter-spacing:2px">CRYSTALS ON FIELD:</span>
       <span id="crystal-count" style="color:#a0d4ff;font-weight:bold">—</span>
     `;
+
+    // ── Next feature contract ──────────────────────────────────────────────
+
+    const featureSpec = document.getElementById('feature-spec');
+    if (featureSpec) {
+      featureSpec.innerHTML = `
+        <div class="panel-title blue">NEXT FEATURE CONTRACT</div>
+        <div class="feature-line"><span>WHO</span><b id="feature-who">—</b></div>
+        <div class="feature-line"><span>WHEN</span><b id="feature-when">—</b></div>
+        <div class="feature-line"><span>WHAT</span><b id="feature-what">—</b></div>
+        <div class="feature-line"><span>STATUS</span><b id="feature-status">PENDING</b></div>
+      `;
+    }
   }
 
   _barRow(icon, label, id, numText, pct, type) {
@@ -130,6 +143,9 @@ export class HUD {
     const countEl = document.getElementById('crystal-count');
     if (countEl) countEl.textContent = alive;
 
+    // Feature contract
+    this._updateFeature(world);
+
     // Event feed
     this._updateFeed(world);
   }
@@ -174,5 +190,22 @@ export class HUD {
       item.el.style.opacity = String(1 - (age / FEED_TTL) * 0.7);
       return true;
     });
+  }
+
+  _updateFeature(world) {
+    const feature = world.nextFeature;
+    if (!feature) return;
+    const who = document.getElementById('feature-who');
+    const when = document.getElementById('feature-when');
+    const what = document.getElementById('feature-what');
+    const status = document.getElementById('feature-status');
+
+    if (who) who.textContent = feature.actor.toUpperCase();
+    if (when) when.textContent = `SCORE ≥ ${feature.triggerScore}`;
+    if (what) what.textContent = feature.action.toUpperCase();
+    if (status) {
+      status.textContent = feature.completed ? 'COMPLETED' : 'PENDING';
+      status.className = feature.completed ? 'green' : 'blue';
+    }
   }
 }

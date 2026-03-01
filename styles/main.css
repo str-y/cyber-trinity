@@ -212,7 +212,7 @@ html, body {
 /* ── Kill / event feed ── */
 #event-feed {
   position: absolute;
-  top: 60px;
+  top: 140px;
   right: 18px;
   display: flex;
   flex-direction: column;
@@ -282,3 +282,40 @@ html, body {
 .legend-dot.blue  { background: #4aa8ff; box-shadow: 0 0 6px #4aa8ff; }
 .legend-dot.green { background: #50ff78; box-shadow: 0 0 6px #50ff78; }
 .legend-dot.red   { background: #ff4444; box-shadow: 0 0 6px #ff4444; }
+
+/* ── Next feature contract panel ── */
+#feature-spec {
+  position: absolute;
+  top: 56px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 8px 10px;
+  backdrop-filter: blur(6px);
+  min-width: 220px;
+}
+
+.feature-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.feature-line span {
+  opacity: 0.5;
+  font-size: 8px;
+  letter-spacing: 2px;
+}
+
+.feature-line b {
+  font-size: 10px;
+  font-weight: bold;
+  color: #a0d4ff;
+}

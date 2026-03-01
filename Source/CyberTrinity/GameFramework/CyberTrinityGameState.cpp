@@ -41,6 +41,24 @@ void ACyberTrinityGameState::AddScore(EFaction Faction, int32 Points)
 
     Scores[Idx] += Points;
     OnScoreChanged.Broadcast(Faction, Scores[Idx]);
+
+    if (!bNextFeatureCompleted &&
+        Faction == NextFeatureFaction &&
+        Scores[Idx] >= NextFeatureTriggerScore)
+    {
+        bNextFeatureCompleted = true;
+        Scores[Idx] += NextFeatureBonusScore;
+        OnScoreChanged.Broadcast(Faction, Scores[Idx]);
+
+        const FText Msg = FText::Format(
+            NSLOCTEXT("CyberTrinity", "NextFeatureComplete",
+                "{0} completed OVERCLOCK UPLINK (+{1})"),
+            UEnum::GetDisplayValueAsText(Faction),
+            FText::AsNumber(NextFeatureBonusScore)
+        );
+        OnEventFeedEntry.Broadcast(Msg);
+    }
+
     CheckWinCondition();
 }
 
@@ -92,6 +110,11 @@ void ACyberTrinityGameState::OnRep_MatchTimeRemaining()
     // Blueprint / UI can bind directly to MatchTimeRemaining
 }
 
+void ACyberTrinityGameState::OnRep_NextFeatureCompleted()
+{
+    // Blueprint / UI can bind directly to bNextFeatureCompleted
+}
+
 void ACyberTrinityGameState::CheckWinCondition()
 {
     for (int32 i = 1; i < Scores.Num(); ++i)
@@ -114,4 +137,5 @@ void ACyberTrinityGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACyberTrinityGameState, Scores);
     DOREPLIFETIME(ACyberTrinityGameState, MatchTimeRemaining);
+    DOREPLIFETIME(ACyberTrinityGameState, bNextFeatureCompleted);
 }

@@ -62,6 +62,23 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Match")
     int32 ScoreLimit = 200;
 
+    // ── Next feature contract ───────────────────────────────────────────────
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    EFaction NextFeatureFaction = EFaction::Archive;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    int32 NextFeatureTriggerScore = 100;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    int32 NextFeatureBonusScore = 15;
+
+    UPROPERTY(ReplicatedUsing = OnRep_NextFeatureCompleted, BlueprintReadOnly, Category = "Feature")
+    bool bNextFeatureCompleted = false;
+
+    UFUNCTION()
+    void OnRep_NextFeatureCompleted();
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
