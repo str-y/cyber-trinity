@@ -1,0 +1,33 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.4",
+	"Category": "",
+	"Description": "Cyber Trinity — 5v5v5 data-node combat in a rain-soaked neon cyberpunk datacenter city. Rendered with Lumen global illumination, Nanite virtualized geometry, and cinematic volumetric fog.",
+	"Modules": [
+		{
+			"Name": "CyberTrinity",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"CoreUObject",
+				"EnhancedInput",
+				"AIModule",
+				"GameplayAbilities",
+				"UMG",
+				"Niagara",
+				"PhysicsCore"
+			]
+		}
+	],
+	"Plugins": [
+		{ "Name": "EnhancedInput",      "Enabled": true },
+		{ "Name": "GameplayAbilities",  "Enabled": true },
+		{ "Name": "Niagara",            "Enabled": true },
+		{ "Name": "ChaosVehicles",      "Enabled": false },
+		{ "Name": "Paper2D",            "Enabled": false },
+		{ "Name": "AnimationWarping",   "Enabled": true },
+		{ "Name": "MotionWarping",      "Enabled": true },
+		{ "Name": "NNE",                "Enabled": true }
+	]
+}
