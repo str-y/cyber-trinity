@@ -1,0 +1,284 @@
+/* =============================================
+   CYBER TRINITY — Main Stylesheet
+   Dark cyberpunk neon aesthetic
+   ============================================= */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  color: #e0e0e0;
+  font-family: 'Courier New', Courier, monospace;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── Game container ── */
+#game-container {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #05080f;
+}
+
+/* ── Holographic HUD overlay ── */
+#hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ── Score panel (top centre) ── */
+#score-panel {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.35);
+  border-radius: 4px;
+  padding: 6px 18px;
+  backdrop-filter: blur(6px);
+}
+
+.score-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 68px;
+}
+
+.score-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  opacity: 0.75;
+  margin-bottom: 2px;
+}
+
+.score-value {
+  font-size: 26px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  line-height: 1;
+  text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+}
+
+.score-divider {
+  font-size: 20px;
+  opacity: 0.30;
+  margin: 0 4px;
+}
+
+/* faction colours */
+.blue  { color: #4aa8ff; }
+.green { color: #50ff78; }
+.red   { color: #ff4444; }
+
+/* ── Left bottom — local player status ── */
+#status-left {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 10px 14px;
+  backdrop-filter: blur(6px);
+  min-width: 180px;
+}
+
+/* ── Right bottom — ability / cooldown ── */
+#status-right {
+  position: absolute;
+  bottom: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 10px 14px;
+  backdrop-filter: blur(6px);
+  min-width: 180px;
+}
+
+/* ── Stat rows ── */
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.stat-icon {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.stat-label {
+  width: 52px;
+  opacity: 0.65;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.bar-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.bar-fill.health { background: linear-gradient(90deg, #50ff78, #00cc44); box-shadow: 0 0 6px #50ff78; }
+.bar-fill.energy { background: linear-gradient(90deg, #4aa8ff, #0055cc); box-shadow: 0 0 6px #4aa8ff; }
+.bar-fill.ability { background: linear-gradient(90deg, #ff4444, #cc0000); box-shadow: 0 0 6px #ff4444; }
+.bar-fill.cooldown { background: linear-gradient(90deg, #ffcc00, #ff8800); box-shadow: 0 0 6px #ffcc00; }
+
+.stat-num {
+  font-size: 10px;
+  width: 36px;
+  text-align: right;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── HUD panel title ── */
+.panel-title {
+  font-size: 8px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  opacity: 0.50;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 4px;
+}
+
+/* ── Mini crystal counter ── */
+#crystal-counter {
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 6px 12px;
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+#crystal-counter .gem { font-size: 16px; }
+
+/* ── Kill / event feed ── */
+#event-feed {
+  position: absolute;
+  top: 60px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.feed-item {
+  background: rgba(0, 10, 30, 0.65);
+  border-left: 2px solid;
+  padding: 3px 8px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  opacity: 1;
+  transition: opacity 1.5s ease;
+  border-radius: 0 3px 3px 0;
+  backdrop-filter: blur(4px);
+}
+.feed-item.blue  { border-color: #4aa8ff; color: #9dd5ff; }
+.feed-item.green { border-color: #50ff78; color: #a0ffc0; }
+.feed-item.red   { border-color: #ff4444; color: #ffa0a0; }
+
+/* ── Scanline overlay ── */
+#scanlines {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.06) 3px,
+    rgba(0, 0, 0, 0.06) 4px
+  );
+  pointer-events: none;
+}
+
+/* ── Faction legend (top left) ── */
+#faction-legend {
+  position: absolute;
+  top: 12px;
+  left: 18px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.legend-dot.blue  { background: #4aa8ff; box-shadow: 0 0 6px #4aa8ff; }
+.legend-dot.green { background: #50ff78; box-shadow: 0 0 6px #50ff78; }
+.legend-dot.red   { background: #ff4444; box-shadow: 0 0 6px #ff4444; }

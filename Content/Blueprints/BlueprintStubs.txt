@@ -1,0 +1,54 @@
+# Cyber Trinity — Content Blueprint Stubs
+#
+# This file documents the Blueprint assets that should be created in the
+# Unreal Editor Content Browser after compiling the C++ project.
+# Each entry maps to a Blueprint class that extends a C++ base.
+#
+# Format: BlueprintName | ParentClass | Location | Key settings
+
+# ── Game Framework ────────────────────────────────────────────────────────────
+BP_CyberTrinityGameMode   | ACyberTrinityGameMode  | /Game/Blueprints/ | Set ArchiveFaction/LifeForgeFaction/CoreProtocolFaction data assets
+BP_CyberTrinityGameState  | ACyberTrinityGameState | /Game/Blueprints/ | ScoreLimit=200
+BP_CyberTrinityHUD        | ACyberTrinityHUD       | /Game/Blueprints/ | HUDWidgetClass=W_CyberTrinityHUD
+
+# ── Agent Characters ──────────────────────────────────────────────────────────
+BP_DataSniper    | AAgentCharacter | /Game/Blueprints/Characters/ | Archive (Blue)  — skeletal mesh, energy rifle socket
+BP_BioGuard      | AAgentCharacter | /Game/Blueprints/Characters/ | LifeForge (Green) — shield component, bionic armour
+BP_CoreStriker   | AAgentCharacter | /Game/Blueprints/Characters/ | CoreProtocol (Red) — power-fist, dash ability
+
+# ── Data Nodes (place 3 in level) ─────────────────────────────────────────────
+BP_DataNode_Archive      | ADataNode | /Game/Blueprints/Factions/ | NodeFaction=Archive,      server-rack static mesh
+BP_DataNode_LifeForge    | ADataNode | /Game/Blueprints/Factions/ | NodeFaction=LifeForge,    bionic-tree static mesh
+BP_DataNode_CoreProtocol | ADataNode | /Game/Blueprints/Factions/ | NodeFaction=CoreProtocol, furnace static mesh
+
+# ── Pickups ───────────────────────────────────────────────────────────────────
+BP_MemoryCrystal | AMemoryCrystal | /Game/Blueprints/Pickups/ | SM_MemoryCrystal, NS_CrystalAmbient, MI_MemoryCrystal
+
+# ── Faction Data Assets ───────────────────────────────────────────────────────
+DA_Archive       | UFactionDefinition | /Game/Data/Factions/ | PrimaryColor=(R=0.29,G=0.66,B=1.0), EmissiveIntensity=8
+DA_LifeForge     | UFactionDefinition | /Game/Data/Factions/ | PrimaryColor=(R=0.31,G=1.0, B=0.47), EmissiveIntensity=8
+DA_CoreProtocol  | UFactionDefinition | /Game/Data/Factions/ | PrimaryColor=(R=1.0, G=0.27,B=0.27), EmissiveIntensity=8
+
+# ── HUD Widget ────────────────────────────────────────────────────────────────
+W_CyberTrinityHUD | UUserWidget | /Game/UI/ | Semi-transparent holographic UMG layout (see README)
+
+# ── Niagara Systems ───────────────────────────────────────────────────────────
+NS_ShieldDome         | /Game/FX/Shields/ | Faction-coloured holographic dome, ShieldPulse + ShieldHealth float params
+NS_CrystalAmbient     | /Game/FX/Crystal/ | Looping data-spark halo around free crystals
+NS_CarryTrail_Blue    | /Game/FX/Trails/  | Faction colour trail when carrying crystal
+NS_CarryTrail_Green   | /Game/FX/Trails/  |
+NS_CarryTrail_Red     | /Game/FX/Trails/  |
+NS_DataStream         | /Game/FX/Network/ | Animated dots travelling between Data Nodes along splines
+NS_DeathBurst_Blue    | /Game/FX/Combat/  |
+NS_DeathBurst_Green   | /Game/FX/Combat/  |
+NS_DeathBurst_Red     | /Game/FX/Combat/  |
+NS_Rain               | /Game/FX/Weather/ | 220 rain streaks, wind drift, puddle splashes
+
+# ── Materials ─────────────────────────────────────────────────────────────────
+MI_MemoryCrystal      | /Game/Materials/  | Translucent emissive, Pulse (scalar) + DissolveAmount (scalar)
+MI_AgentArmour_Base   | /Game/Materials/  | NeonColor (vector) + EmissiveIntensity (scalar) on neon-line layer
+MI_ShieldDome         | /Game/Materials/  | Translucent additive, ShieldColor (vector) + ShieldPulse (scalar)
+M_WetConcrete         | /Game/Materials/  | Lumen-aware, puddle normal map, rain ripple WPO
+
+# ── Level ─────────────────────────────────────────────────────────────────────
+CyberTrinityLevel | /Game/Maps/ | Triangular base layout, rain BP_Sky, exponential height fog, post-process volume
