@@ -100,14 +100,17 @@ Controls (browser preview):
 
 ---
 
-## 次の機能に必要なもの
+## Next Task
 
-次の機能を追加するために、まず以下を決める必要があります。
+Bring the **Unreal `GameState` implementation** up to parity with the browser
+preview's full feature-contract chain.
 
-- **対象機能の定義**（誰が、いつ、何をできるようにするか）
-- **データ更新箇所の特定**（`Game` の world state / `HUD` 表示 / UE側 `GameState`）
-- **完了条件**（スコア反映、イベント通知、見た目変化など）
-- **検証方法**（ブラウザ表示確認、必要ならUEエディタ内での挙動確認）
+- Add contracts #2 and #3 after **Activate Overclock Uplink** (currently only one
+  contract is tracked in UE).
+- Replicate current contract progress/status so HUD/Blueprint can show
+  who/when/what and completion state.
+- Keep completion effects aligned with the browser contract flow (score bonus +
+  event feed updates per contract).
 
 ---
 
