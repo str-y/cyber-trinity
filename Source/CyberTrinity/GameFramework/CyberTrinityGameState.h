@@ -74,6 +74,9 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
     int32 NextFeatureBonusScore = 15;
 
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    FString NextFeatureActionName = TEXT("ACTIVATE OVERCLOCK UPLINK");
+
     UPROPERTY(ReplicatedUsing = OnRep_NextFeatureCompleted, BlueprintReadOnly, Category = "Feature")
     bool bNextFeatureCompleted = false;
 

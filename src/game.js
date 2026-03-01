@@ -10,6 +10,10 @@ import { HUD } from './hud.js';
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 10;
 const DATA_STREAM_COUNT = 30;
+const FEATURE_ACTION = 'Activate Overclock Uplink';
+const FEATURE_TRIGGER_SCORE = 100;
+const FEATURE_BONUS_SCORE = 15;
+const FEATURE_VISUAL_DURATION = 6;
 
 export class Game {
   constructor(canvas) {
@@ -33,12 +37,12 @@ export class Game {
     this.events      = [];
     this.nextFeature = {
       actor: 'blue',               // who
-      triggerScore: 100,           // when
-      action: 'Activate Overclock Uplink', // what
-      bonusScore: 15,
+      triggerScore: FEATURE_TRIGGER_SCORE, // when
+      action: FEATURE_ACTION, // what
+      bonusScore: FEATURE_BONUS_SCORE,
       completed: false,
       visualTimer: 0,
-      visualDuration: 6,
+      visualDuration: FEATURE_VISUAL_DURATION,
     };
   }
 
