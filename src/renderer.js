@@ -81,6 +81,9 @@ export class Renderer {
     // ── Spark particles ────────────────────────────────────────────────────
     this._drawParticles(world.sparks);
 
+    // ── Ability projectiles ─────────────────────────────────────────────
+    this._drawProjectiles(world.projectiles);
+
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
 
@@ -463,6 +466,66 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur  = 0;
+    ctx.restore();
+  }
+
+  _drawProjectiles(projectiles) {
+    const ctx = this.ctx;
+    if (!projectiles) return;
+    ctx.save();
+    for (const proj of projectiles) {
+      const f   = FACTIONS[proj.faction];
+      const { r, g, b } = hexToRgb(f.color);
+      const a   = proj.alpha;
+
+      if (proj.type === 'railshot') {
+        // Bright energy bolt with glow trail
+        ctx.shadowBlur  = 16;
+        ctx.shadowColor = f.color;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
+        ctx.lineWidth   = 3;
+        ctx.beginPath();
+        ctx.moveTo(proj.x, proj.y);
+        ctx.lineTo(proj.x - proj.vx * 0.03, proj.y - proj.vy * 0.03);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(255,255,255,${a * 0.9})`;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (proj.type === 'bioshield') {
+        // Expanding/pulsing heal aura circle
+        const pulse = 0.5 + 0.3 * Math.sin(this.time * 6);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${a * pulse * 0.6})`;
+        ctx.lineWidth   = 2;
+        ctx.shadowBlur  = 14;
+        ctx.shadowColor = f.color;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, proj.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        // Inner glow fill
+        const grad = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, proj.radius);
+        grad.addColorStop(0, `rgba(${r},${g},${b},${a * 0.12})`);
+        grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+        ctx.fillStyle = grad;
+        ctx.fill();
+      } else if (proj.type === 'powerdash') {
+        // Blazing charge trail
+        ctx.shadowBlur  = 12;
+        ctx.shadowColor = f.color;
+        ctx.fillStyle   = `rgba(${r},${g},${b},${a * 0.8})`;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, proj.radius * a, 0, Math.PI * 2);
+        ctx.fill();
+        // Motion streak
+        ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.5})`;
+        ctx.lineWidth   = 4;
+        ctx.beginPath();
+        ctx.moveTo(proj.x, proj.y);
+        ctx.lineTo(proj.x - proj.vx * 0.05, proj.y - proj.vy * 0.05);
+        ctx.stroke();
+      }
+    }
+    ctx.shadowBlur = 0;
     ctx.restore();
   }
 

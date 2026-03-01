@@ -3,7 +3,7 @@
  * Main game world — state management, update loop, entity spawning.
  */
 
-import { Base, Player, MemoryCrystal, Particle, RainDrop, FACTIONS } from './entities.js';
+import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS } from './entities.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 
@@ -14,6 +14,8 @@ const FEATURE_ACTION = 'Activate Overclock Uplink';
 const FEATURE_TRIGGER_SCORE = 100;
 const FEATURE_BONUS_SCORE = 15;
 const FEATURE_VISUAL_DURATION = 6;
+const AI_ABILITY_CHANCE = 0.008;       // per-agent per-frame probability (~once every 12 s)
+const PROJECTILE_HIT_TOLERANCE = 4;    // extra px added to collision radii
 
 export class Game {
   constructor(canvas) {
@@ -35,6 +37,7 @@ export class Game {
     this.rain        = [];
     this.scores      = { blue: 30, green: 85, red: 55 };  // pre-seeded per spec
     this.events      = [];
+    this.projectiles = [];
     this.nextFeature = {
       actor: 'blue',               // who
       triggerScore: FEATURE_TRIGGER_SCORE, // when
@@ -172,7 +175,31 @@ export class Game {
     for (const base of Object.values(this.bases)) base.update(dt);
 
     // Players
-    for (const player of this.players) player.update(dt, this);
+    for (const player of this.players) {
+      player.update(dt, this);
+      // Energy regeneration
+      if (player.alive && player.energy < 100) {
+        player.energy = Math.min(100, player.energy + 8 * dt);
+      }
+    }
+
+    // Ability firing (AI triggers periodically)
+    for (const player of this.players) {
+      if (player.alive && Math.random() < AI_ABILITY_CHANCE) {
+        const proj = player.tryAbility(this);
+        if (proj) {
+          this.projectiles.push(proj);
+          this.events.push({
+            text: `${player.faction.toUpperCase()} fired ${player.abilityName.toUpperCase()}`,
+            faction: player.faction,
+            ttl: 2,
+          });
+        }
+      }
+    }
+
+    // Projectiles
+    this._updateProjectiles(dt);
 
     // Crystals
     for (const c of this.crystals) c.update(dt);
@@ -226,6 +253,49 @@ export class Game {
         base.y + (Math.random() - 0.5) * 60,
         FACTIONS[f].color, 4));
     }
+  }
+
+  _updateProjectiles(dt) {
+    for (const proj of this.projectiles) {
+      proj.update(dt);
+
+      // Bio Shield follows its owner and heals nearby allies
+      if (proj.type === 'bioshield' && proj.owner) {
+        proj.x = proj.owner.x;
+        proj.y = proj.owner.y;
+        for (const p of this.players) {
+          if (!p.alive || p.faction !== proj.faction) continue;
+          const dx = p.x - proj.x, dy = p.y - proj.y;
+          if (Math.sqrt(dx * dx + dy * dy) < proj.radius) {
+            p.health = Math.min(p.maxHealth, p.health + 15 * dt);
+          }
+        }
+        continue;
+      }
+
+      // Railshot & Power Dash — hit enemies
+      for (const p of this.players) {
+        if (!p.alive || p.faction === proj.faction) continue;
+        const dx = p.x - proj.x, dy = p.y - proj.y;
+        if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
+          p.health -= proj.damage;
+          this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
+          if (p.health <= 0) {
+            p.alive = false;
+            p.respawnTimer = 5;
+            if (p.carrying) { p.carrying.carrier = null; p.carrying = null; }
+            this.events.push({
+              text: `${proj.faction.toUpperCase()} ability KO on ${p.faction.toUpperCase()}`,
+              faction: proj.faction,
+              ttl: 3,
+            });
+          }
+          proj.hit = true;
+          break;
+        }
+      }
+    }
+    this.projectiles = this.projectiles.filter(p => !p.dead);
   }
 
   _updateNextFeature(dt) {

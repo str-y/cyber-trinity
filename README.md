@@ -106,6 +106,22 @@ python3 -m http.server 8080
 
 ---
 
+## Faction Abilities
+
+Each faction has a unique active ability triggered by AI agents when their cooldown
+is ready and enough energy is available.
+
+| Faction | Ability | Effect | Cost | Cooldown |
+|---------|---------|--------|------|----------|
+| 🔵 The Archive | **Railshot** | Fast long-range energy bolt, 35 damage | 25 energy | 6 s |
+| 🟢 Life Forge | **Bio Shield** | Stationary heal aura, restores 15 HP/s to nearby allies for 2.5 s | 35 energy | 6 s |
+| 🔴 Core Protocol | **Power Dash** | Blazing charge toward nearest enemy, 25 damage | 30 energy | 6 s |
+
+Energy regenerates at 8 per second (max 100). Abilities appear in the event feed
+and are visible as canvas effects in the browser preview.
+
+---
+
 ## HUD Layout
 
 ```
