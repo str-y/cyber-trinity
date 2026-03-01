@@ -93,6 +93,11 @@ python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
+Controls (browser preview):
+
+- `W/A/S/D` or Arrow keys: move the local blue agent (`YOU`)
+- `Space`: activate faction ability (Railshot) when charged
+
 ---
 
 ## 次の機能に必要なもの
