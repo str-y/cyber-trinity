@@ -11,6 +11,7 @@ export class HUD {
   constructor() {
     this._scoreEls   = {};
     this._feedItems  = [];
+    this._scoreboardEl = null;
     this._init();
   }
 
@@ -98,6 +99,22 @@ export class HUD {
         <div class="feature-line"><span>STATUS</span><b id="feature-status">PENDING</b></div>
       `;
     }
+
+    // ── Match-end scoreboard ───────────────────────────────────────────────
+    const scoreboard = document.getElementById('match-scoreboard');
+    if (scoreboard) {
+      scoreboard.innerHTML = `
+        <div class="panel-title">MATCH RESULT</div>
+        <div class="scoreboard-winner" id="scoreboard-winner">—</div>
+        <div class="scoreboard-header">
+          <span>FACTION</span><span>K</span><span>D</span><span>A</span><span>💎</span><span>PTS</span>
+        </div>
+        <div class="scoreboard-row"><span class="blue">THE ARCHIVE</span><span id="sb-blue-kills">0</span><span id="sb-blue-deaths">0</span><span id="sb-blue-assists">0</span><span id="sb-blue-crystals">0</span><span id="sb-blue-score">0</span></div>
+        <div class="scoreboard-row"><span class="green">LIFE FORGE</span><span id="sb-green-kills">0</span><span id="sb-green-deaths">0</span><span id="sb-green-assists">0</span><span id="sb-green-crystals">0</span><span id="sb-green-score">0</span></div>
+        <div class="scoreboard-row"><span class="red">CORE PROTOCOL</span><span id="sb-red-kills">0</span><span id="sb-red-deaths">0</span><span id="sb-red-assists">0</span><span id="sb-red-crystals">0</span><span id="sb-red-score">0</span></div>
+      `;
+      this._scoreboardEl = scoreboard;
+    }
   }
 
   _barRow(icon, label, id, numText, pct, type) {
@@ -148,6 +165,7 @@ export class HUD {
 
     // Event feed
     this._updateFeed(world);
+    this._updateScoreboard(world);
   }
 
   _setBar(id, value, max, numText) {
@@ -221,6 +239,33 @@ export class HUD {
       status.className = feature.completed
         ? 'feature-status-completed'
         : 'feature-status-pending';
+    }
+  }
+
+  _updateScoreboard(world) {
+    if (!this._scoreboardEl) return;
+    const visible = !!world.matchEnded;
+    this._scoreboardEl.style.display = visible ? 'flex' : 'none';
+    if (!visible) return;
+
+    const winner = document.getElementById('scoreboard-winner');
+    if (winner) {
+      const winnerFaction = world.winnerFaction ? world.winnerFaction.toUpperCase() : 'UNKNOWN';
+      winner.textContent = `${winnerFaction} VICTORY`;
+    }
+
+    for (const faction of ['blue', 'green', 'red']) {
+      const stats = world.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
+      const score = world.scores[faction] ?? 0;
+      const set = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(val);
+      };
+      set(`sb-${faction}-kills`, stats.kills);
+      set(`sb-${faction}-deaths`, stats.deaths);
+      set(`sb-${faction}-assists`, stats.assists);
+      set(`sb-${faction}-crystals`, stats.crystals);
+      set(`sb-${faction}-score`, score);
     }
   }
 }
