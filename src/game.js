@@ -428,16 +428,16 @@ export class Game {
       // Railshot & Power Dash — hit enemies
       for (const p of this.players) {
         if (!p.alive || p.faction === proj.faction) continue;
-          const dx = p.x - proj.x, dy = p.y - proj.y;
-          if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
-            this._registerDamage(p, proj.faction);
-            p.health -= proj.damage;
-            this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
-            if (p.health <= 0) {
-              this._recordElimination(p, proj.faction, 'ability KO');
-            }
-            proj.hit = true;
-            break;
+        const dx = p.x - proj.x, dy = p.y - proj.y;
+        if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
+          this._registerDamage(p, proj.faction);
+          p.health -= proj.damage;
+          this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
+          if (p.health <= 0) {
+            this._recordElimination(p, proj.faction, 'ability KO');
+          }
+          proj.hit = true;
+          break;
         }
       }
     }

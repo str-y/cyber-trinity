@@ -249,7 +249,10 @@ export class HUD {
     if (!visible) return;
 
     const winner = document.getElementById('scoreboard-winner');
-    if (winner) winner.textContent = `${(world.winnerFaction ?? '').toUpperCase()} VICTORY`;
+    if (winner) {
+      const winnerFaction = world.winnerFaction ? world.winnerFaction.toUpperCase() : 'UNKNOWN';
+      winner.textContent = `${winnerFaction} VICTORY`;
+    }
 
     for (const faction of ['blue', 'green', 'red']) {
       const stats = world.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
