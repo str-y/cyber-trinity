@@ -250,6 +250,56 @@ html, body {
   pointer-events: none;
 }
 
+/* ── Match-end scoreboard ── */
+#match-scoreboard {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 420px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(1, 8, 26, 0.88);
+  border: 1px solid rgba(100, 180, 255, 0.45);
+  border-radius: 6px;
+  padding: 12px 14px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 18px rgba(74, 168, 255, 0.25);
+}
+
+.scoreboard-winner {
+  text-align: center;
+  color: #a0d4ff;
+  font-size: 14px;
+  letter-spacing: 2px;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.scoreboard-header,
+.scoreboard-row {
+  display: grid;
+  grid-template-columns: 1fr repeat(5, 34px);
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.scoreboard-header {
+  opacity: 0.55;
+  font-size: 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 4px;
+}
+
+.scoreboard-row span:not(:first-child),
+.scoreboard-header span:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Faction legend (top left) ── */
 #faction-legend {
   position: absolute;

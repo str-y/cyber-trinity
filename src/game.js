@@ -12,6 +12,10 @@ const CRYSTAL_COUNT   = 10;
 const DATA_STREAM_COUNT = 30;
 const AI_ABILITY_CHANCE = 0.008;       // per-agent per-frame probability (~once every 12 s)
 const PROJECTILE_HIT_TOLERANCE = 4;    // extra px added to collision radii
+const KILL_SCORE = 5;
+const ASSIST_SCORE = 2;
+const ASSIST_WINDOW = 5;
+const SCORE_LIMIT = 200;
 
 // Feature contract chain — each contract triggers when the actor reaches the score threshold.
 // On completion the actor receives a bonus and their agents receive a timed buff.
@@ -61,8 +65,17 @@ export class Game {
     this.dataStreams  = [];
     this.rain        = [];
     this.scores      = { blue: 30, green: 85, red: 55 };  // pre-seeded per spec
+    this.stats       = {
+      blue: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+      green: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+      red: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+    };
     this.events      = [];
     this.projectiles = [];
+    this.damageLedger = new Map();
+    this.matchEnded = false;
+    this.winnerFaction = null;
+    this.elapsed = 0;
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({
       ...c,
@@ -220,6 +233,9 @@ export class Game {
   // ── Update ────────────────────────────────────────────────────────────────
 
   _update(dt) {
+    if (this.matchEnded) return;
+    this.elapsed += dt;
+
     // Bases
     for (const base of Object.values(this.bases)) base.update(dt);
 
@@ -326,6 +342,8 @@ export class Game {
         base.y + (Math.random() - 0.5) * 60,
         FACTIONS[f].color, 4));
     }
+
+    this._checkMatchEnd();
   }
 
   _updateLocalPlayer(player, dt) {
@@ -368,6 +386,7 @@ export class Game {
       if (Math.hypot(player.x - base.x, player.y - base.y) < BASE_RADIUS - 5) {
         base.crystalsStored++;
         this.scores[player.faction] += 10;
+        this.stats[player.faction].crystals++;
         this.events.push({
           text: `${player.faction.toUpperCase()} PLAYER delivered CRYSTAL (+10)`,
           faction: player.faction,
@@ -409,22 +428,16 @@ export class Game {
       // Railshot & Power Dash — hit enemies
       for (const p of this.players) {
         if (!p.alive || p.faction === proj.faction) continue;
-        const dx = p.x - proj.x, dy = p.y - proj.y;
-        if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
-          p.health -= proj.damage;
-          this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
-          if (p.health <= 0) {
-            p.alive = false;
-            p.respawnTimer = 5;
-            if (p.carrying) { p.carrying.carrier = null; p.carrying = null; }
-            this.events.push({
-              text: `${proj.faction.toUpperCase()} ability KO on ${p.faction.toUpperCase()}`,
-              faction: proj.faction,
-              ttl: 3,
-            });
-          }
-          proj.hit = true;
-          break;
+          const dx = p.x - proj.x, dy = p.y - proj.y;
+          if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
+            this._registerDamage(p, proj.faction);
+            p.health -= proj.damage;
+            this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
+            if (p.health <= 0) {
+              this._recordElimination(p, proj.faction, 'ability KO');
+            }
+            proj.hit = true;
+            break;
         }
       }
     }
@@ -471,6 +484,59 @@ export class Game {
         this.featureIndex < this.featureContracts.length) {
       this.featureIndex++;
     }
+  }
+
+  _registerDamage(target, attackerFaction) {
+    if (!target || !attackerFaction) return;
+    if (!this.damageLedger.has(target)) this.damageLedger.set(target, new Map());
+    this.damageLedger.get(target).set(attackerFaction, this.elapsed);
+  }
+
+  _recordElimination(victim, killerFaction, reason = 'eliminated') {
+    victim.alive = false;
+    victim.respawnTimer = 5;
+    if (victim.carrying) { victim.carrying.carrier = null; victim.carrying = null; }
+
+    this.stats[killerFaction].kills++;
+    this.stats[victim.faction].deaths++;
+    this.scores[killerFaction] += KILL_SCORE;
+    this.events.push({
+      text: `${killerFaction.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
+      faction: killerFaction,
+      ttl: 3,
+    });
+
+    const ledger = this.damageLedger.get(victim);
+    if (ledger) {
+      for (const [assistFaction, hitTime] of ledger.entries()) {
+        if (assistFaction === killerFaction) continue;
+        if ((this.elapsed - hitTime) > ASSIST_WINDOW) continue;
+        this.stats[assistFaction].assists++;
+        this.scores[assistFaction] += ASSIST_SCORE;
+        this.events.push({
+          text: `${assistFaction.toUpperCase()} assisted on ${victim.faction.toUpperCase()} (+${ASSIST_SCORE})`,
+          faction: assistFaction,
+          ttl: 3,
+        });
+      }
+    }
+    this.damageLedger.delete(victim);
+    this._checkMatchEnd();
+  }
+
+  _checkMatchEnd() {
+    if (this.matchEnded) return;
+    const ranking = ['blue', 'green', 'red']
+      .map(faction => ({ faction, score: this.scores[faction] ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+    if ((ranking[0]?.score ?? 0) < SCORE_LIMIT) return;
+    this.matchEnded = true;
+    this.winnerFaction = ranking[0].faction;
+    this.events.push({
+      text: `${this.winnerFaction.toUpperCase()} wins the match`,
+      faction: this.winnerFaction,
+      ttl: 5,
+    });
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────

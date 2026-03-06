@@ -21,9 +21,11 @@ volumetric fog, and cinematic post-process.
 - **15 agents** compete simultaneously (5v5v5).
 - **Memory Crystals** (`AMemoryCrystal`) — glowing polyhedra scattered across the field.  
   Agents pick them up and deliver them to their faction's **Data Node** (`ADataNode`) for **+10 points**.
+- **Combat scoring**: defeating an enemy agent grants **+5 points**, and recent damage contributors receive an **assist +2 points**.
 - Each Data Node is protected by an animated **holographic shield dome** (Niagara).
 - Nodes are connected by animated **network-link splines** with travelling data-stream particles.
 - Pre-seeded match scores: **Archive 30 · Life Forge 85 · Core Protocol 55**.
+- When any faction reaches the score limit (200), the match ends and a scoreboard overlay shows kills / deaths / assists / crystal pickups.
 
 ---
 

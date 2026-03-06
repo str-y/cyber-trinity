@@ -145,6 +145,7 @@ export class Player {
       if (dist(this.x, this.y, base.x, base.y) < BASE_RADIUS - 5) {
         base.crystalsStored++;
         world.scores[this.faction] += 10;
+        world.stats[this.faction].crystals++;
         world.events.push({
           text: `${this.faction.toUpperCase()} AGENT delivered CRYSTAL (+10)`,
           faction: this.faction,
@@ -200,20 +201,14 @@ export class Player {
         const baseDmg = this.faction === 'red' ? 18 : this.faction === 'blue' ? 22 : 12;
         const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
         const dmg = baseDmg * dmgMult;
+        world._registerDamage(enemy, this.faction);
         enemy.health -= dmg;
         world.sparks.push(...Particle.burst(
           (this.x + enemy.x) / 2,
           (this.y + enemy.y) / 2,
           FACTIONS[this.faction].color, 6));
         if (enemy.health <= 0) {
-          enemy.alive = false;
-          enemy.respawnTimer = 5;
-          if (enemy.carrying) { enemy.carrying.carrier = null; enemy.carrying = null; }
-          world.events.push({
-            text: `${this.faction.toUpperCase()} eliminated ${enemy.faction.toUpperCase()} agent`,
-            faction: this.faction,
-            ttl: 3,
-          });
+          world._recordElimination(enemy, this.faction);
         }
       }
     }
