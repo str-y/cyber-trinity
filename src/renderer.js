@@ -87,6 +87,9 @@ export class Renderer {
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
 
+    // ── Victory overlay ────────────────────────────────────────────────────
+    if (world.matchEnded) this._drawVictoryOverlay(world);
+
     // ── Vignette / atmospheric overlay ─────────────────────────────────────
     this._drawVignette(W, H);
   }
@@ -588,6 +591,60 @@ export class Renderer {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  // ── Victory overlay ────────────────────────────────────────────────────────
+
+  _drawVictoryOverlay(world) {
+    const ctx = this.ctx;
+    const W = world.width;
+    const H = world.height;
+    const faction = world.winnerFaction;
+    if (!faction) return;
+
+    const f = FACTIONS[faction];
+    const { r, g, b } = hexToRgb(f.color);
+
+    // Time remaining in victory (5s total), used to drive flash intensity
+    const t = world.victoryTimer;  // 5 → 0
+    // Flash is bright at the start, fading over the first 2 seconds
+    const flashAlpha = Math.max(0, Math.min(0.45, (t - 3) * 0.225));
+
+    ctx.save();
+
+    // Full-screen faction-coloured flash
+    if (flashAlpha > 0) {
+      ctx.fillStyle = `rgba(${r},${g},${b},${flashAlpha})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Persistent tinted overlay
+    ctx.fillStyle = `rgba(${r},${g},${b},0.12)`;
+    ctx.fillRect(0, 0, W, H);
+
+    // "VICTORY" text with glow
+    const pulse = 0.85 + 0.15 * Math.sin(this.time * 4);
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowBlur   = 40;
+    ctx.shadowColor  = f.color;
+    ctx.fillStyle    = `rgba(${r},${g},${b},${pulse})`;
+    ctx.font         = `bold ${Math.min(W * 0.12, 120)}px "Courier New", monospace`;
+    ctx.fillText('VICTORY', W / 2, H / 2 - 30);
+
+    // Winner faction name
+    ctx.shadowBlur  = 20;
+    ctx.font        = `bold ${Math.min(W * 0.04, 36)}px "Courier New", monospace`;
+    ctx.fillStyle   = `rgba(255,255,255,0.85)`;
+    ctx.fillText(f.name.toUpperCase(), W / 2, H / 2 + 30);
+
+    // Restart countdown
+    ctx.shadowBlur  = 0;
+    ctx.font        = `${Math.min(W * 0.025, 20)}px "Courier New", monospace`;
+    ctx.fillStyle   = 'rgba(255,255,255,0.55)';
+    ctx.fillText(`Restarting in ${Math.ceil(Math.max(0, t))}s`, W / 2, H / 2 + 70);
+
+    ctx.restore();
   }
 
   // ── Vignette ──────────────────────────────────────────────────────────────

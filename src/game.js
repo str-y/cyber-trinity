@@ -75,6 +75,7 @@ export class Game {
     this.damageLedger = new Map();
     this.matchEnded = false;
     this.winnerFaction = null;
+    this.victoryTimer = 0;
     this.elapsed = 0;
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({
@@ -233,7 +234,11 @@ export class Game {
   // ── Update ────────────────────────────────────────────────────────────────
 
   _update(dt) {
-    if (this.matchEnded) return;
+    if (this.matchEnded) {
+      this.victoryTimer -= dt;
+      if (this.victoryTimer <= 0) this._restart();
+      return;
+    }
     this.elapsed += dt;
 
     // Bases
@@ -532,11 +537,69 @@ export class Game {
     if ((ranking[0]?.score ?? 0) < SCORE_LIMIT) return;
     this.matchEnded = true;
     this.winnerFaction = ranking[0].faction;
+    this.victoryTimer = 5;
     this.events.push({
       text: `${this.winnerFaction.toUpperCase()} wins the match`,
       faction: this.winnerFaction,
       ttl: 5,
     });
+  }
+
+  _restart() {
+    // Reset scores and stats
+    for (const faction of ['blue', 'green', 'red']) {
+      this.scores[faction] = 0;
+      this.stats[faction] = { kills: 0, deaths: 0, assists: 0, crystals: 0 };
+    }
+
+    // Reset match state
+    this.matchEnded = false;
+    this.winnerFaction = null;
+    this.victoryTimer = 0;
+    this.elapsed = 0;
+    this.events = [];
+    this.projectiles = [];
+    this.sparks = [];
+    this.damageLedger = new Map();
+    this.factionBuffs = {};
+
+    // Reset feature contracts
+    this.featureContracts = FEATURE_CONTRACTS.map(c => ({
+      ...c,
+      completed: false,
+      visualTimer: 0,
+    }));
+    this.featureIndex = 0;
+
+    // Reset players
+    for (const player of this.players) {
+      const base = this.bases[player.faction];
+      const angle = (player.index / 5) * Math.PI * 2;
+      const r = 40 + Math.random() * 20;
+      player.x = base.x + Math.cos(angle) * r;
+      player.y = base.y + Math.sin(angle) * r;
+      player.health = player.maxHealth;
+      player.energy = 100;
+      player.alive = true;
+      player.respawnTimer = 0;
+      player.carrying = null;
+      player.cooldown = Math.random() * player.abilityMax;
+      player.trailPoints = [];
+    }
+
+    // Reset bases
+    for (const base of Object.values(this.bases)) {
+      base.crystalsStored = 0;
+    }
+
+    // Reset crystals
+    this.crystals = [];
+    for (let i = 0; i < CRYSTAL_COUNT; i++) {
+      this.crystals.push(new MemoryCrystal(
+        60 + Math.random() * (this.width - 120),
+        60 + Math.random() * (this.height - 120),
+      ));
+    }
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────
