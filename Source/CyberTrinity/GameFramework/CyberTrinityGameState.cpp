@@ -51,7 +51,10 @@ void ACyberTrinityGameState::Tick(float DeltaTime)
         MatchTimeRemaining = FMath::Max(0.f, MatchTimeRemaining - DeltaTime);
     }
 
-    if (HasAuthority() && bNextFeatureCompleted && NextFeatureVisualTimer > 0.f)
+    if (HasAuthority() &&
+        FeatureContracts.IsValidIndex(NextFeatureIndex) &&
+        bNextFeatureCompleted &&
+        NextFeatureVisualTimer > 0.f)
     {
         NextFeatureVisualTimer = FMath::Max(0.f, NextFeatureVisualTimer - DeltaTime);
         if (NextFeatureVisualTimer <= 0.f)

@@ -96,7 +96,9 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
 private:
+    /** Advances to the next contract after the completion visual window ends. */
     void AdvanceNextFeatureContract();
+    /** Applies contract parameters (faction/trigger/bonus/action) for the given index. */
     void SetFeatureContractByIndex(int32 FeatureIndex);
 
     // Scores indexed by EFaction (cast to uint8)
