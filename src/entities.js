@@ -272,9 +272,9 @@ export class Player {
       return;
     }
 
-    // Engage nearby enemies within patrol zone
+    // Engage enemies that have entered the patrol zone around the base
     const enemy = world._nearestEnemy(this.x, this.y, this.faction);
-    if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < PATROL_RADIUS) {
+    if (enemy && dist(enemy.x, enemy.y, base.x, base.y) < PATROL_RADIUS) {
       this.target = enemy;
       this.state  = 'attack';
       return;
