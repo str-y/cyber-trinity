@@ -4,6 +4,24 @@
 #include "Engine/World.h"
 #include "TimerManager.h"
 
+namespace
+{
+    struct FFeatureContractSpec
+    {
+        EFaction Faction;
+        int32 TriggerScore;
+        int32 BonusScore;
+        const TCHAR* ActionName;
+        float VisualDuration;
+    };
+
+    static const TArray<FFeatureContractSpec> FeatureContracts = {
+        { EFaction::Archive,      100, 15, TEXT("ACTIVATE OVERCLOCK UPLINK"), 6.f },
+        { EFaction::LifeForge,    120, 15, TEXT("DEPLOY FIREWALL"),           6.f },
+        { EFaction::CoreProtocol, 150, 15, TEXT("CORE MELTDOWN"),             6.f },
+    };
+}
+
 ACyberTrinityGameState::ACyberTrinityGameState()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -15,6 +33,8 @@ ACyberTrinityGameState::ACyberTrinityGameState()
     Scores[static_cast<uint8>(EFaction::Archive)]      = 30;
     Scores[static_cast<uint8>(EFaction::LifeForge)]    = 85;
     Scores[static_cast<uint8>(EFaction::CoreProtocol)] = 55;
+
+    SetFeatureContractByIndex(0);
 }
 
 void ACyberTrinityGameState::BeginPlay()
@@ -29,6 +49,15 @@ void ACyberTrinityGameState::Tick(float DeltaTime)
     if (HasAuthority() && MatchTimeRemaining > 0.f)
     {
         MatchTimeRemaining = FMath::Max(0.f, MatchTimeRemaining - DeltaTime);
+    }
+
+    if (HasAuthority() && bNextFeatureCompleted && NextFeatureVisualTimer > 0.f)
+    {
+        NextFeatureVisualTimer = FMath::Max(0.f, NextFeatureVisualTimer - DeltaTime);
+        if (NextFeatureVisualTimer <= 0.f)
+        {
+            AdvanceNextFeatureContract();
+        }
     }
 }
 
@@ -48,6 +77,9 @@ void ACyberTrinityGameState::AddScore(EFaction Faction, int32 Points)
     {
         bNextFeatureCompleted = true;
         Scores[Idx] += NextFeatureBonusScore;
+        NextFeatureVisualTimer = FeatureContracts.IsValidIndex(NextFeatureIndex)
+            ? FeatureContracts[NextFeatureIndex].VisualDuration
+            : 0.f;
         OnScoreChanged.Broadcast(Faction, Scores[Idx]);
 
         const FText Msg = FText::Format(
@@ -116,6 +148,35 @@ void ACyberTrinityGameState::OnRep_NextFeatureCompleted()
     // Blueprint / UI can bind directly to bNextFeatureCompleted
 }
 
+void ACyberTrinityGameState::AdvanceNextFeatureContract()
+{
+    SetFeatureContractByIndex(NextFeatureIndex + 1);
+}
+
+void ACyberTrinityGameState::SetFeatureContractByIndex(int32 FeatureIndex)
+{
+    NextFeatureIndex = FeatureIndex;
+    bNextFeatureCompleted = false;
+    NextFeatureVisualTimer = 0.f;
+
+    if (FeatureContracts.IsValidIndex(FeatureIndex))
+    {
+        const FFeatureContractSpec& Feature = FeatureContracts[FeatureIndex];
+        NextFeatureFaction = Feature.Faction;
+        NextFeatureTriggerScore = Feature.TriggerScore;
+        NextFeatureBonusScore = Feature.BonusScore;
+        NextFeatureActionName = Feature.ActionName;
+        return;
+    }
+
+    // All contracts are done.
+    NextFeatureFaction = EFaction::None;
+    NextFeatureTriggerScore = 0;
+    NextFeatureBonusScore = 0;
+    NextFeatureActionName = TEXT("ALL CONTRACTS FULFILLED");
+    bNextFeatureCompleted = true;
+}
+
 void ACyberTrinityGameState::CheckWinCondition()
 {
     for (int32 i = 1; i < Scores.Num(); ++i)
@@ -138,5 +199,11 @@ void ACyberTrinityGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     DOREPLIFETIME(ACyberTrinityGameState, Scores);
     DOREPLIFETIME(ACyberTrinityGameState, MatchTimeRemaining);
+    DOREPLIFETIME(ACyberTrinityGameState, NextFeatureFaction);
+    DOREPLIFETIME(ACyberTrinityGameState, NextFeatureTriggerScore);
+    DOREPLIFETIME(ACyberTrinityGameState, NextFeatureBonusScore);
+    DOREPLIFETIME(ACyberTrinityGameState, NextFeatureActionName);
     DOREPLIFETIME(ACyberTrinityGameState, bNextFeatureCompleted);
+    DOREPLIFETIME(ACyberTrinityGameState, NextFeatureIndex);
+    DOREPLIFETIME(ACyberTrinityGameState, NextFeatureVisualTimer);
 }

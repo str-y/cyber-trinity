@@ -65,20 +65,26 @@ public:
     // ── Next feature contract ───────────────────────────────────────────────
 
     // Archive maps to Blue in the browser preview implementation.
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Feature")
     EFaction NextFeatureFaction = EFaction::Archive;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Feature")
     int32 NextFeatureTriggerScore = 100;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Feature")
     int32 NextFeatureBonusScore = 15;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Feature")
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Feature")
     FString NextFeatureActionName = TEXT("ACTIVATE OVERCLOCK UPLINK");
 
     UPROPERTY(ReplicatedUsing = OnRep_NextFeatureCompleted, BlueprintReadOnly, Category = "Feature")
     bool bNextFeatureCompleted = false;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Feature")
+    int32 NextFeatureIndex = 0;
+
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Feature")
+    float NextFeatureVisualTimer = 0.f;
 
     UFUNCTION()
     void OnRep_NextFeatureCompleted();
@@ -90,6 +96,9 @@ protected:
     virtual void Tick(float DeltaTime) override;
 
 private:
+    void AdvanceNextFeatureContract();
+    void SetFeatureContractByIndex(int32 FeatureIndex);
+
     // Scores indexed by EFaction (cast to uint8)
     UPROPERTY(ReplicatedUsing = OnRep_Scores)
     TArray<int32> Scores;
