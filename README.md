@@ -102,6 +102,21 @@ Controls (browser preview):
 
 ---
 
+## AI Roles
+
+Each faction's 5 agents are assigned specialised roles that govern their behaviour:
+
+| Role | Count | Behaviour |
+|------|-------|-----------|
+| **Collector** | ×2 | Crystal retrieval specialist — strongly prefers picking up Memory Crystals and delivering them to base. Very low aggro. |
+| **Fighter** | ×2 | Enemy elimination specialist — seeks out and attacks enemy agents, pushes toward enemy bases. Ignores crystals. |
+| **Defender** | ×1 | Base patrol guard — stays within a patrol radius around the faction's base, engages intruders, and picks up nearby crystals. |
+
+Role assignment is based on the agent index (0–4) within each faction:
+indices 0–1 → Collector, indices 2–3 → Fighter, index 4 → Defender.
+
+---
+
 ## 次の機能に必要なもの
 
 次の機能を追加するために、まず以下を決める必要があります。

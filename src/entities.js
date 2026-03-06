@@ -108,6 +108,11 @@ export class Player {
       case 'blue': this.speed = 55; this.aggro = 0.55; this.abilityName = 'Railshot';   this.abilityCost = 25; break;
       case 'green':this.speed = 62; this.aggro = 0.45; this.abilityName = 'Bio Shield'; this.abilityCost = 35; break;
     }
+
+    // AI role assignment: 2 Collectors, 2 Fighters, 1 Defender
+    if (index <= 1)      this.role = 'collector';
+    else if (index <= 3) this.role = 'fighter';
+    else                 this.role = 'defender';
   }
 
   update(dt, world) {
@@ -133,12 +138,12 @@ export class Player {
     this._updateTrail();
   }
 
-  // ── Simple behaviour AI ────────────────────────────────────────────────────
+  // ── Role-based behaviour AI ─────────────────────────────────────────────────
 
   _ai(dt, world) {
     const base = world.bases[this.faction];
 
-    // Carrying a crystal → deliver to base
+    // Carrying a crystal → deliver to base (all roles)
     if (this.carrying) {
       this.state  = 'carry';
       this.target = base;
@@ -159,32 +164,14 @@ export class Player {
 
     this.attackTimer -= dt;
 
-    // Wander/roam toward a crystal or enemy base
-    if (this.state === 'roam' || !this.target) {
-      // Prefer nearest free crystal
-      const crystal = world._nearestFreeCrystal(this.x, this.y);
-      if (crystal && Math.random() < 0.60) {
-        this.target = crystal;
-        this.state  = 'carry'; // will pick up when close
-      } else if (Math.random() < this.aggro * 0.25) {
-        // Attack a random enemy base
-        const enemies = Object.values(world.bases).filter(b => b.faction !== this.faction);
-        if (enemies.length) {
-          this.target = enemies[Math.floor(Math.random() * enemies.length)];
-          this.state  = 'attack';
-        }
-      } else {
-        this.state  = 'roam';
-        if (!this.target || dist(this.x, this.y, this.target.x, this.target.y) < 20) {
-          this.target = {
-            x: base.x + randRange(-120, 120),
-            y: base.y + randRange(-120, 120),
-          };
-        }
-      }
+    // ── Role-specific decision logic ──────────────────────────────────────
+    switch (this.role) {
+      case 'collector': this._aiCollector(world, base); break;
+      case 'fighter':   this._aiFighter(world, base);   break;
+      case 'defender':  this._aiDefender(world, base);  break;
     }
 
-    // Pick up crystal when close
+    // Pick up crystal when close (collectors & defenders)
     if (this.state === 'carry' && this.target instanceof MemoryCrystal) {
       if (!this.target.delivered && !this.target.carrier &&
           dist(this.x, this.y, this.target.x, this.target.y) < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
@@ -193,7 +180,7 @@ export class Player {
       }
     }
 
-    // Attack nearby enemies
+    // Attack nearby enemies (fighters & defenders, collectors only in self-defence)
     if (this.state === 'attack' && this.attackTimer <= 0) {
       const enemy = world._nearestEnemy(this.x, this.y, this.faction);
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
@@ -211,6 +198,101 @@ export class Player {
           world._recordElimination(enemy, this.faction, 'eliminated');
         }
       }
+    }
+  }
+
+  // Collector: crystal collection specialist (low aggro)
+  _aiCollector(world, base) {
+    if (this.state === 'roam' || !this.target) {
+      const crystal = world._nearestFreeCrystal(this.x, this.y);
+      if (crystal && Math.random() < 0.90) {
+        this.target = crystal;
+        this.state  = 'carry';
+      } else if (Math.random() < this.aggro * 0.08) {
+        // Occasionally fight if threatened
+        const enemies = Object.values(world.bases).filter(b => b.faction !== this.faction);
+        if (enemies.length) {
+          this.target = enemies[Math.floor(Math.random() * enemies.length)];
+          this.state  = 'attack';
+        }
+      } else {
+        this.state = 'roam';
+        if (!this.target || dist(this.x, this.y, this.target.x, this.target.y) < 20) {
+          this.target = {
+            x: base.x + randRange(-120, 120),
+            y: base.y + randRange(-120, 120),
+          };
+        }
+      }
+    }
+  }
+
+  // Fighter: enemy elimination specialist (high aggro, ignores crystals)
+  _aiFighter(world, base) {
+    if (this.state === 'roam' || !this.target) {
+      const enemy = world._nearestEnemy(this.x, this.y, this.faction);
+      if (enemy && Math.random() < 0.85) {
+        this.target = enemy;
+        this.state  = 'attack';
+      } else if (Math.random() < this.aggro * 0.50) {
+        // Push toward enemy base
+        const enemyBases = Object.values(world.bases).filter(b => b.faction !== this.faction);
+        if (enemyBases.length) {
+          this.target = enemyBases[Math.floor(Math.random() * enemyBases.length)];
+          this.state  = 'attack';
+        }
+      } else {
+        this.state = 'roam';
+        if (!this.target || dist(this.x, this.y, this.target.x, this.target.y) < 20) {
+          this.target = {
+            x: base.x + randRange(-180, 180),
+            y: base.y + randRange(-180, 180),
+          };
+        }
+      }
+    }
+  }
+
+  // Defender: base patrol (restricted to patrol radius around own base)
+  _aiDefender(world, base) {
+    const PATROL_RADIUS = 140;
+
+    // If too far from base, return home
+    if (dist(this.x, this.y, base.x, base.y) > PATROL_RADIUS) {
+      this.target = {
+        x: base.x + randRange(-50, 50),
+        y: base.y + randRange(-50, 50),
+      };
+      this.state = 'defend';
+      return;
+    }
+
+    // Engage enemies that have entered the patrol zone around the base
+    const enemy = world._nearestEnemy(this.x, this.y, this.faction);
+    if (enemy && dist(enemy.x, enemy.y, base.x, base.y) < PATROL_RADIUS) {
+      this.target = enemy;
+      this.state  = 'attack';
+      return;
+    }
+
+    // Grab crystals near the base
+    const crystal = world._nearestFreeCrystal(this.x, this.y);
+    if (crystal && dist(crystal.x, crystal.y, base.x, base.y) < PATROL_RADIUS) {
+      this.target = crystal;
+      this.state  = 'carry';
+      return;
+    }
+
+    // Patrol around base
+    if (this.state === 'roam' || this.state === 'defend' || !this.target ||
+        dist(this.x, this.y, this.target.x, this.target.y) < 20) {
+      const angle = Math.random() * Math.PI * 2;
+      const r = randRange(30, PATROL_RADIUS * 0.7);
+      this.target = {
+        x: base.x + Math.cos(angle) * r,
+        y: base.y + Math.sin(angle) * r,
+      };
+      this.state = 'defend';
     }
   }
 
