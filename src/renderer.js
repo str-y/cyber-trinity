@@ -60,7 +60,7 @@ export class Renderer {
 
     // ── Bases ──────────────────────────────────────────────────────────────
     for (const base of Object.values(world.bases)) {
-      this._drawBase(base);
+      this._drawBase(base, world);
     }
 
     // ── Memory crystals ────────────────────────────────────────────────────
@@ -83,6 +83,9 @@ export class Renderer {
 
     // ── Ability projectiles ─────────────────────────────────────────────
     this._drawProjectiles(world.projectiles);
+
+    // ── Chaos event effects ────────────────────────────────────────────
+    this._drawChaosEvent(world);
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
@@ -198,12 +201,13 @@ export class Renderer {
 
   // ── Base ──────────────────────────────────────────────────────────────────
 
-  _drawBase(base) {
+  _drawBase(base, world) {
     const ctx = this.ctx;
     const f   = FACTIONS[base.faction];
     const { r, g, b } = hexToRgb(f.color);
     const pulse = 0.45 + 0.20 * Math.sin(this.time * 1.3 + base.shieldPulse);
     const R = BASE_RADIUS;
+    const shieldsDown = world?.chaosEvent?.type === 'nexus_overload';
 
     ctx.save();
 
@@ -216,15 +220,17 @@ export class Renderer {
     ctx.arc(base.x, base.y, R * 2.2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Shield ring (animated)
-    const shieldAlpha = 0.35 + 0.25 * Math.sin(this.time * 1.8 + base.shieldPulse);
-    ctx.strokeStyle = `rgba(${r},${g},${b},${shieldAlpha})`;
-    ctx.lineWidth   = 3;
-    ctx.shadowBlur  = 18;
-    ctx.shadowColor = f.color;
-    ctx.beginPath();
-    ctx.arc(base.x, base.y, R + 10 + 4 * Math.sin(this.time * 2), 0, Math.PI * 2);
-    ctx.stroke();
+    // Shield ring (animated) — suppressed during Nexus Overload
+    if (!shieldsDown) {
+      const shieldAlpha = 0.35 + 0.25 * Math.sin(this.time * 1.8 + base.shieldPulse);
+      ctx.strokeStyle = `rgba(${r},${g},${b},${shieldAlpha})`;
+      ctx.lineWidth   = 3;
+      ctx.shadowBlur  = 18;
+      ctx.shadowColor = f.color;
+      ctx.beginPath();
+      ctx.arc(base.x, base.y, R + 10 + 4 * Math.sin(this.time * 2), 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     // Inner platform
     ctx.shadowBlur  = 12;
@@ -550,6 +556,128 @@ export class Renderer {
     }
     ctx.shadowBlur = 0;
     ctx.restore();
+  }
+
+  // ── Chaos event visual effects ──────────────────────────────────────────
+
+  _drawChaosEvent(world) {
+    const event = world.chaosEvent;
+    if (!event) return;
+
+    const ctx = this.ctx;
+    const t = this.time;
+
+    if (event.type === 'emp_storm') {
+      // Pulsing yellow/white EMP zone circle
+      const pulse = 0.4 + 0.3 * Math.sin(t * 5);
+      ctx.save();
+
+      // Outer warning ring
+      ctx.strokeStyle = `rgba(255,204,0,${pulse * 0.6})`;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = '#ffcc00';
+      ctx.setLineDash([8, 6]);
+      ctx.lineDashOffset = -t * 40;
+      ctx.beginPath();
+      ctx.arc(event.x, event.y, event.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Inner EMP field fill
+      const grad = ctx.createRadialGradient(event.x, event.y, 0, event.x, event.y, event.radius);
+      grad.addColorStop(0, `rgba(255,204,0,${0.08 + pulse * 0.05})`);
+      grad.addColorStop(0.7, `rgba(255,204,0,${0.04 + pulse * 0.03})`);
+      grad.addColorStop(1, 'rgba(255,204,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(event.x, event.y, event.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Static-noise crackles inside zone
+      ctx.globalAlpha = pulse * 0.4;
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2 + t * 3;
+        const r = event.radius * (0.3 + 0.5 * Math.random());
+        const cx = event.x + Math.cos(angle) * r;
+        const cy = event.y + Math.sin(angle) * r;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx - 4, cy);
+        ctx.lineTo(cx + 4, cy + (Math.random() - 0.5) * 8);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // Label
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = `rgba(255,204,0,${0.6 + pulse * 0.3})`;
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('⚡ EMP STORM', event.x, event.y - event.radius - 8);
+
+      ctx.restore();
+
+    } else if (event.type === 'crystal_rain') {
+      // Shimmer overlay across the whole screen
+      const W = world.width, H = world.height;
+      const pulse = 0.3 + 0.2 * Math.sin(t * 3);
+      ctx.save();
+
+      // Faint full-screen blue shimmer
+      ctx.fillStyle = `rgba(160,212,255,${0.03 + pulse * 0.02})`;
+      ctx.fillRect(0, 0, W, H);
+
+      // Falling sparkles (decorative, not actual crystals)
+      ctx.globalAlpha = 0.7;
+      for (let i = 0; i < 20; i++) {
+        const sx = ((i * 73.7 + t * 30) % W);
+        const sy = ((i * 137.3 + t * 80 + i * 20) % (H + 40)) - 20;
+        const sparkPulse = 0.5 + 0.5 * Math.sin(t * 6 + i);
+        const size = 2 + sparkPulse * 2;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#a0d4ff';
+        ctx.fillStyle = `rgba(180,220,255,${sparkPulse * 0.7})`;
+        ctx.beginPath();
+        // Small diamond shape
+        ctx.moveTo(sx, sy - size);
+        ctx.lineTo(sx + size * 0.6, sy);
+        ctx.lineTo(sx, sy + size);
+        ctx.lineTo(sx - size * 0.6, sy);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+    } else if (event.type === 'nexus_overload') {
+      // Red/magenta warning flicker on all bases — shields down
+      const pulse = 0.3 + 0.4 * Math.sin(t * 8);
+      ctx.save();
+      for (const base of Object.values(world.bases)) {
+        // Broken shield ring (dashed, red/magenta)
+        ctx.strokeStyle = `rgba(255,102,255,${pulse * 0.5})`;
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = '#ff66ff';
+        ctx.setLineDash([4, 8]);
+        ctx.lineDashOffset = -t * 50;
+        ctx.beginPath();
+        ctx.arc(base.x, base.y, BASE_RADIUS + 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // "SHIELD DOWN" label
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = `rgba(255,102,255,${0.5 + pulse * 0.4})`;
+        ctx.font = 'bold 8px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('SHIELD DOWN', base.x, base.y - BASE_RADIUS - 18);
+      }
+      ctx.restore();
+    }
   }
 
   _drawFeaturePulse(world) {

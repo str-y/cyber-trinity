@@ -20,6 +20,21 @@ namespace
         { EFaction::LifeForge,    120, 15, TEXT("DEPLOY FIREWALL"),           6.f },
         { EFaction::CoreProtocol, 150, 15, TEXT("CORE MELTDOWN"),             6.f },
     };
+
+    struct FChaosEventSpec
+    {
+        const TCHAR* Type;
+        const TCHAR* Name;
+        float Duration;
+    };
+
+    static const TArray<FChaosEventSpec> ChaosEventSpecs = {
+        { TEXT("emp_storm"),      TEXT("EMP STORM"),      8.f  },
+        { TEXT("crystal_rain"),   TEXT("CRYSTAL RAIN"),   15.f },
+        { TEXT("nexus_overload"), TEXT("NEXUS OVERLOAD"), 8.f  },
+    };
+
+    static constexpr float ChaosEventInterval = 30.f;
 }
 
 ACyberTrinityGameState::ACyberTrinityGameState()
@@ -60,6 +75,29 @@ void ACyberTrinityGameState::Tick(float DeltaTime)
         if (NextFeatureVisualTimer <= 0.f)
         {
             AdvanceNextFeatureContract();
+        }
+    }
+
+    // Chaos event tick
+    if (HasAuthority())
+    {
+        if (ChaosEventRemaining > 0.f)
+        {
+            ChaosEventRemaining = FMath::Max(0.f, ChaosEventRemaining - DeltaTime);
+            if (ChaosEventRemaining <= 0.f)
+            {
+                ChaosEventType = TEXT("none");
+                ChaosEventName = TEXT("");
+                ChaosEventCooldown = ChaosEventInterval;
+            }
+        }
+        else
+        {
+            ChaosEventCooldown -= DeltaTime;
+            if (ChaosEventCooldown <= 0.f)
+            {
+                TriggerRandomChaosEvent();
+            }
         }
     }
 }
@@ -180,6 +218,30 @@ void ACyberTrinityGameState::SetFeatureContractByIndex(int32 FeatureIndex)
     bNextFeatureCompleted = true;
 }
 
+void ACyberTrinityGameState::TriggerRandomChaosEvent()
+{
+    if (!ChaosEventSpecs.Num()) return;
+    const int32 Idx = FMath::RandRange(0, ChaosEventSpecs.Num() - 1);
+    const FChaosEventSpec& Spec = ChaosEventSpecs[Idx];
+    ChaosEventType = Spec.Type;
+    ChaosEventName = Spec.Name;
+    ChaosEventRemaining = Spec.Duration;
+
+    if (ChaosEventType == TEXT("emp_storm"))
+    {
+        // Pick a random point in the play area (assumes 1920×1080 for now)
+        ChaosEventLocation = FVector(
+            FMath::RandRange(200.f, 1720.f),
+            FMath::RandRange(200.f, 880.f),
+            0.f);
+        ChaosEventRadius = FMath::RandRange(120.f, 180.f);
+    }
+
+    const FText Msg = FText::FromString(
+        FString::Printf(TEXT("%s has begun!"), *ChaosEventName));
+    OnEventFeedEntry.Broadcast(Msg);
+}
+
 void ACyberTrinityGameState::CheckWinCondition()
 {
     for (int32 i = 1; i < Scores.Num(); ++i)
@@ -209,4 +271,9 @@ void ACyberTrinityGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty
     DOREPLIFETIME(ACyberTrinityGameState, bNextFeatureCompleted);
     DOREPLIFETIME(ACyberTrinityGameState, NextFeatureIndex);
     DOREPLIFETIME(ACyberTrinityGameState, NextFeatureVisualTimer);
+    DOREPLIFETIME(ACyberTrinityGameState, ChaosEventType);
+    DOREPLIFETIME(ACyberTrinityGameState, ChaosEventName);
+    DOREPLIFETIME(ACyberTrinityGameState, ChaosEventRemaining);
+    DOREPLIFETIME(ACyberTrinityGameState, ChaosEventLocation);
+    DOREPLIFETIME(ACyberTrinityGameState, ChaosEventRadius);
 }
