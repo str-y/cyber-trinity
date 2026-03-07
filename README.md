@@ -221,6 +221,11 @@ Controls (browser preview):
 
 - `W/A/S/D` or Arrow keys: move the local blue agent (`YOU`)
 - `Space`: activate job ability (Warrior: Power Slash) when charged
+- `Esc`: open the settings panel
+  - Game speed: `0.5× / 1× / 2×`
+  - Effect quality: `Low / High`
+  - HUD display: `On / Off`
+  - CRT effect: `On / Off`
 
 ---
 

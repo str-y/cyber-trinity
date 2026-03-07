@@ -27,6 +27,7 @@ export class Renderer {
     this.canvas = canvas;
     this.ctx    = canvas.getContext('2d');
     this.time   = 0;
+    this.lowQuality = false;
   }
 
   resize(w, h) {
@@ -36,6 +37,7 @@ export class Renderer {
 
   render(world, dt) {
     this.time += dt;
+    this.lowQuality = world.settings?.effectQuality === 'low';
     const ctx = this.ctx;
     const { width: W, height: H } = world;
 
@@ -50,7 +52,7 @@ export class Renderer {
     this._drawRain(world.rain);
 
     // ── Puddle / wet-floor reflections ─────────────────────────────────────
-    this._drawReflections(world, W, H);
+    if (!this.lowQuality) this._drawReflections(world, W, H);
 
     // ── Network links between bases ────────────────────────────────────────
     this._drawNetworkLinks(world);
@@ -131,7 +133,8 @@ export class Renderer {
     ctx.save();
     ctx.strokeStyle = 'rgba(140,180,255,0.18)';
     ctx.lineWidth   = 0.8;
-    for (const drop of rainDrops) {
+    for (let i = 0; i < rainDrops.length; i += this.lowQuality ? 2 : 1) {
+      const drop = rainDrops[i];
       ctx.globalAlpha = drop.alpha;
       ctx.beginPath();
       ctx.moveTo(drop.x, drop.y);
@@ -196,7 +199,8 @@ export class Renderer {
   _drawDataStreams(streams) {
     const ctx = this.ctx;
     ctx.save();
-    for (const s of streams) {
+    for (let i = 0; i < streams.length; i += this.lowQuality ? 2 : 1) {
+      const s = streams[i];
       const { r, g, b } = hexToRgb(s.color);
       ctx.beginPath();
       ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
@@ -513,10 +517,11 @@ export class Renderer {
   _drawParticles(particles) {
     const ctx = this.ctx;
     ctx.save();
-    for (const p of particles) {
+    for (let i = 0; i < particles.length; i += this.lowQuality ? 2 : 1) {
+      const p = particles[i];
       const { r, g, b } = hexToRgb(p.color);
       ctx.globalAlpha = p.alpha;
-      ctx.shadowBlur  = 6;
+      ctx.shadowBlur  = this.lowQuality ? 0 : 6;
       ctx.shadowColor = p.color;
       ctx.fillStyle   = `rgb(${r},${g},${b})`;
       ctx.beginPath();
@@ -539,7 +544,7 @@ export class Renderer {
 
       if (proj.type === 'railshot') {
         // Bright energy bolt with glow trail
-        ctx.shadowBlur  = 16;
+        ctx.shadowBlur  = this.lowQuality ? 8 : 16;
         ctx.shadowColor = f.color;
         ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
         ctx.lineWidth   = 3;
@@ -556,7 +561,7 @@ export class Renderer {
         const pulse = 0.5 + 0.3 * Math.sin(this.time * 6);
         ctx.strokeStyle = `rgba(${r},${g},${b},${a * pulse * 0.6})`;
         ctx.lineWidth   = 2;
-        ctx.shadowBlur  = 14;
+        ctx.shadowBlur  = this.lowQuality ? 6 : 14;
         ctx.shadowColor = f.color;
         ctx.beginPath();
         ctx.arc(proj.x, proj.y, proj.radius, 0, Math.PI * 2);
@@ -569,7 +574,7 @@ export class Renderer {
         ctx.fill();
       } else if (proj.type === 'powerdash') {
         // Blazing charge trail
-        ctx.shadowBlur  = 12;
+        ctx.shadowBlur  = this.lowQuality ? 6 : 12;
         ctx.shadowColor = f.color;
         ctx.fillStyle   = `rgba(${r},${g},${b},${a * 0.8})`;
         ctx.beginPath();
@@ -650,6 +655,7 @@ export class Renderer {
       ctx.restore();
 
     } else if (event.type === 'crystal_rain') {
+      if (this.lowQuality) return;
       // Shimmer overlay across the whole screen
       const W = world.width, H = world.height;
       const pulse = 0.3 + 0.2 * Math.sin(t * 3);
@@ -917,7 +923,7 @@ export class Renderer {
     const ctx  = this.ctx;
     const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
     grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, 'rgba(0,0,0,0.62)');
+    grad.addColorStop(1, this.lowQuality ? 'rgba(0,0,0,0.48)' : 'rgba(0,0,0,0.62)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
   }
