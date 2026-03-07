@@ -423,3 +423,103 @@ html, body {
   min-width: 28px;
   text-align: right;
 }
+
+/* ── Faction selection screen ── */
+#faction-select {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  background: rgba(2, 6, 18, 0.95);
+  z-index: 100;
+}
+
+.fs-title {
+  font-size: 22px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: #a0d4ff;
+  text-shadow: 0 0 16px rgba(74, 168, 255, 0.5);
+}
+
+.fs-cards {
+  display: flex;
+  gap: 24px;
+}
+
+.fs-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 190px;
+  padding: 24px 16px;
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  color: #e0e0e0;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.fs-card:hover {
+  transform: translateY(-4px);
+}
+.fs-card[data-faction="blue"]:hover {
+  border-color: #4aa8ff;
+  box-shadow: 0 0 20px rgba(74, 168, 255, 0.35);
+}
+.fs-card[data-faction="green"]:hover {
+  border-color: #50ff78;
+  box-shadow: 0 0 20px rgba(80, 255, 120, 0.35);
+}
+.fs-card[data-faction="red"]:hover {
+  border-color: #ff4444;
+  box-shadow: 0 0 20px rgba(255, 68, 68, 0.35);
+}
+
+.fs-emoji {
+  font-size: 36px;
+}
+
+.fs-name {
+  font-size: 13px;
+  font-weight: bold;
+  letter-spacing: 3px;
+  text-shadow: 0 0 8px currentColor;
+}
+
+.fs-role {
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.65;
+}
+
+.fs-tagline {
+  font-size: 9px;
+  letter-spacing: 1px;
+  opacity: 0.45;
+  font-style: italic;
+}
+
+.fs-stats {
+  font-size: 10px;
+  letter-spacing: 1px;
+  opacity: 0.70;
+  margin-top: 4px;
+}
+
+.fs-ability {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #ffcc00;
+  margin-top: 2px;
+}

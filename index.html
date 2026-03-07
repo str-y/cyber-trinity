@@ -12,6 +12,37 @@
     <!-- Main render surface -->
     <canvas id="game-canvas"></canvas>
 
+    <!-- Faction selection screen -->
+    <div id="faction-select">
+      <div class="fs-title">CHOOSE YOUR FACTION</div>
+      <div class="fs-cards">
+        <button class="fs-card" data-faction="blue">
+          <span class="fs-emoji">🔵</span>
+          <span class="fs-name blue">THE ARCHIVE</span>
+          <span class="fs-role">Data Sniper</span>
+          <span class="fs-tagline">Knowledge &amp; Order</span>
+          <span class="fs-stats">SPD 55 · AGR 0.55</span>
+          <span class="fs-ability">⚡ Railshot</span>
+        </button>
+        <button class="fs-card" data-faction="green">
+          <span class="fs-emoji">🟢</span>
+          <span class="fs-name green">LIFE FORGE</span>
+          <span class="fs-role">Bio Guard</span>
+          <span class="fs-tagline">Life &amp; Harmony</span>
+          <span class="fs-stats">SPD 62 · AGR 0.45</span>
+          <span class="fs-ability">🛡️ Bio Shield</span>
+        </button>
+        <button class="fs-card" data-faction="red">
+          <span class="fs-emoji">🔴</span>
+          <span class="fs-name red">CORE PROTOCOL</span>
+          <span class="fs-role">Core Striker</span>
+          <span class="fs-tagline">Force &amp; Chaos</span>
+          <span class="fs-stats">SPD 85 · AGR 0.85</span>
+          <span class="fs-ability">💨 Power Dash</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Holographic HUD overlay -->
     <div id="hud">
 
@@ -53,7 +84,15 @@
     import { Game } from './src/game.js';
     const canvas = document.getElementById('game-canvas');
     const game   = new Game(canvas);
-    game.start();
+    const selectScreen = document.getElementById('faction-select');
+
+    document.querySelectorAll('.fs-card').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const faction = btn.dataset.faction;
+        selectScreen.style.display = 'none';
+        game.start(faction);
+      });
+    });
   </script>
 </body>
 </html>

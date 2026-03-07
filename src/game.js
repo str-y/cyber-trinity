@@ -139,7 +139,8 @@ export class Game {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  start() {
+  start(chosenFaction = 'blue') {
+    this.chosenFaction = chosenFaction;
     this._resize();
     window.addEventListener('resize', () => this._resize());
     this._spawn();
@@ -182,7 +183,7 @@ export class Game {
         this.players.push(p);
       }
     }
-    this.localPlayer = this.players.find(p => p.faction === 'blue') ?? null;
+    this.localPlayer = this.players.find(p => p.faction === this.chosenFaction) ?? null;
     if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
 
     // ── Memory crystals ───────────────────────────────────────────────────

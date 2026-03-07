@@ -4,6 +4,8 @@
  * Scores, health/energy bars, ability cooldowns, event feed, crystal counter.
  */
 
+import { FACTIONS } from './entities.js';
+
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
 
@@ -60,11 +62,11 @@ export class HUD {
       legend.appendChild(row);
     });
 
-    // ── Left status (local blue agent) ────────────────────────────────────
+    // ── Left status (local agent) ─────────────────────────────────────────
 
     const statusLeft = document.getElementById('status-left');
     statusLeft.innerHTML = `
-      <div class="panel-title blue">AGENT STATUS — DATA SNIPER</div>
+      <div class="panel-title" id="status-left-title">AGENT STATUS</div>
       ${this._barRow('❤️', 'HEALTH', 'health',  '100 / 100', 100, 'health')}
       ${this._barRow('⚡', 'ENERGY', 'energy',  '100 / 100', 100, 'energy')}
     `;
@@ -73,7 +75,7 @@ export class HUD {
 
     const statusRight = document.getElementById('status-right');
     statusRight.innerHTML = `
-      <div class="panel-title blue">ABILITY — RAILSHOT</div>
+      <div class="panel-title" id="status-right-title">ABILITY</div>
       ${this._barRow('🎯', 'CHARGE', 'ability', '100%', 100, 'ability')}
       ${this._barRow('⏱', 'COOLDOWN', 'cooldown', '0.0s', 0, 'cooldown')}
     `;
@@ -146,9 +148,24 @@ export class HUD {
       if (el.textContent !== String(s)) el.textContent = s;
     }
 
-    // First blue player as "local player"
-    const local = world.players.find(p => p.faction === 'blue');
+    // Local player (chosen faction)
+    const local = world.localPlayer;
     if (local) {
+      // Update panel titles to reflect chosen faction
+      const fInfo = FACTIONS[local.faction];
+      const leftTitle = document.getElementById('status-left-title');
+      const rightTitle = document.getElementById('status-right-title');
+      const leftText = `AGENT STATUS — ${fInfo.role.toUpperCase()}`;
+      const rightText = `ABILITY — ${local.abilityName.toUpperCase()}`;
+      if (leftTitle && leftTitle.textContent !== leftText) {
+        leftTitle.textContent = leftText;
+        leftTitle.className = `panel-title ${local.faction}`;
+      }
+      if (rightTitle && rightTitle.textContent !== rightText) {
+        rightTitle.textContent = rightText;
+        rightTitle.className = `panel-title ${local.faction}`;
+      }
+
       this._setBar('health', local.health, local.maxHealth,
         `${Math.round(local.health)} / ${local.maxHealth}`);
       this._setBar('energy', local.energy, 100,
