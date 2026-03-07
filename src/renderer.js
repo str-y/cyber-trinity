@@ -518,10 +518,18 @@ export class Renderer {
       ctx.globalAlpha = p.alpha;
       ctx.shadowBlur  = 6;
       ctx.shadowColor = p.color;
-      ctx.fillStyle   = `rgb(${r},${g},${b})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.alpha, 0, Math.PI * 2);
-      ctx.fill();
+      if (p.shape === 'ring') {
+        ctx.lineWidth = Math.max(1, p.lineWidth * p.alpha);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, p.alpha * 0.95)})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle   = `rgb(${r},${g},${b})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.alpha, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur  = 0;

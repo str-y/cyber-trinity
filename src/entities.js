@@ -257,6 +257,7 @@ export class Player {
     this.target    = null;           // {x, y} or jewel or base
     this.state     = 'roam';         // 'roam' | 'attack' | 'carry' | 'defend' | 'capture'
     this.attackTimer = 0;
+    this.auraTimer = Math.random() * 0.16;
 
     // ── Job system (replaces faction-locked abilities) ─────────────────────
     const jobId  = JOB_ASSIGNMENT[index] ?? 'warrior';
@@ -642,7 +643,7 @@ export class MemoryCrystal {
 // ── Particle ──────────────────────────────────────────────────────────────────
 
 export class Particle {
-  constructor(x, y, vx, vy, color, life, size = 2.5) {
+  constructor(x, y, vx, vy, color, life, size = 2.5, options = {}) {
     this.x     = x;
     this.y     = y;
     this.vx    = vx;
@@ -652,23 +653,94 @@ export class Particle {
     this.maxLife = life;
     this.size  = size;
     this.alpha = 1;
+    this.shape = options.shape ?? 'dot';
+    this.gravity = options.gravity ?? 40;
+    this.drag = options.drag ?? 0;
+    this.growth = options.growth ?? 0;
+    this.lineWidth = options.lineWidth ?? 2;
   }
 
   update(dt) {
+    if (this.drag > 0) {
+      const dragFactor = Math.max(0, 1 - this.drag * dt);
+      this.vx *= dragFactor;
+      this.vy *= dragFactor;
+    }
     this.x    += this.vx * dt;
     this.y    += this.vy * dt;
-    this.vy   += 40 * dt; // gravity
+    this.vy   += this.gravity * dt;
+    this.size = Math.max(0.2, this.size + this.growth * dt);
     this.life -= dt;
     this.alpha = Math.max(0, this.life / this.maxLife);
   }
 
   get dead() { return this.life <= 0; }
 
-  static burst(x, y, color, count = 8) {
+  static burst(x, y, color, count = 8, options = {}) {
+    const {
+      speedMin = 40,
+      speedMax = 140,
+      lifeMin = 0.4,
+      lifeMax = 1.2,
+      sizeMin = 2,
+      sizeMax = 3.5,
+      angleOffset = 0,
+      spread = Math.PI * 2,
+      ...particleOptions
+    } = options;
+    return Array.from({ length: count }, () => {
+      const angle = angleOffset + Math.random() * spread;
+      const speed = randRange(speedMin, speedMax);
+      const size = randRange(sizeMin, sizeMax);
+      return new Particle(
+        x, y,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        color,
+        randRange(lifeMin, lifeMax),
+        size,
+        particleOptions,
+      );
+    });
+  }
+
+  static ring(x, y, color, radius = 12, options = {}) {
+    const { life = 0.7, growth = 120, lineWidth = 3, ...particleOptions } = options;
+    return [
+      new Particle(x, y, 0, 0, color, life, radius, {
+        ...particleOptions,
+        shape: 'ring',
+        gravity: 0,
+        growth,
+        lineWidth,
+      }),
+    ];
+  }
+
+  static aura(x, y, color, count = 2, options = {}) {
+    const {
+      ringRadiusMin = PLAYER_RADIUS + 2,
+      ringRadiusMax = PLAYER_RADIUS + 8,
+      ...particleOptions
+    } = options;
     return Array.from({ length: count }, () => {
       const angle = Math.random() * Math.PI * 2;
-      const speed = randRange(40, 140);
-      return new Particle(x, y, Math.cos(angle) * speed, Math.sin(angle) * speed, color, randRange(0.4, 1.2));
+      const radius = randRange(ringRadiusMin, ringRadiusMax);
+      const speed = randRange(8, 28);
+      return new Particle(
+        x + Math.cos(angle) * radius,
+        y + Math.sin(angle) * radius,
+        Math.cos(angle) * speed * 0.6,
+        Math.sin(angle) * speed * 0.6 - randRange(8, 18),
+        color,
+        randRange(0.35, 0.8),
+        randRange(1.6, 2.8),
+        {
+          gravity: -10,
+          drag: 1.8,
+          ...particleOptions,
+        },
+      );
     });
   }
 }
