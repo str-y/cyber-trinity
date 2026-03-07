@@ -62,6 +62,10 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Match")
     int32 ScoreLimit = 200;
 
+    /** Half-extent of the play area (used for chaos event placement). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Match")
+    float PlayAreaHalfExtent = 3000.f;
+
     // ── Next feature contract ───────────────────────────────────────────────
 
     // Archive maps to Blue in the browser preview implementation.

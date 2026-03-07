@@ -37,6 +37,7 @@ const CHAOS_EVENTS = [
     description: 'Bonus crystals raining down!',
     color: '#a0d4ff',
     emoji: '💎',
+    spawnInterval: 1.5,            // spawn a bonus crystal every 1.5 s
   },
   {
     type: 'nexus_overload',
@@ -47,6 +48,8 @@ const CHAOS_EVENTS = [
     emoji: '💥',
   },
 ];
+
+const CHAOS_ZONE_MARGIN = 80;      // px inset from canvas edge for EMP zone placement
 
 // Feature contract chain — each contract triggers when the actor reaches the score threshold.
 // On completion the actor receives a bonus and their agents receive a timed buff.
@@ -551,9 +554,9 @@ export class Game {
       // Crystal Rain: spawn extra crystals periodically
       if (this.chaosEvent.type === 'crystal_rain') {
         this._crystalRainAccum += dt;
-        const spawnInterval = 1.5;  // spawn a crystal every 1.5 s
-        while (this._crystalRainAccum >= spawnInterval) {
-          this._crystalRainAccum -= spawnInterval;
+        const interval = this.chaosEvent.spawnInterval;
+        while (this._crystalRainAccum >= interval) {
+          this._crystalRainAccum -= interval;
           this.crystals.push(new MemoryCrystal(
             60 + Math.random() * (this.width - 120),
             60 + Math.random() * (this.height - 120),
@@ -589,8 +592,9 @@ export class Game {
 
     // EMP Storm: pick a random zone on the map
     if (spec.type === 'emp_storm') {
-      event.x = 80 + Math.random() * (this.width - 160);
-      event.y = 80 + Math.random() * (this.height - 160);
+      const m = CHAOS_ZONE_MARGIN;
+      event.x = m + Math.random() * (this.width - m * 2);
+      event.y = m + Math.random() * (this.height - m * 2);
       event.radius = 120 + Math.random() * 60;  // 120-180 px radius
     }
 

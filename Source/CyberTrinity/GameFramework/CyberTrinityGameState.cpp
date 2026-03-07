@@ -25,16 +25,18 @@ namespace
     {
         const TCHAR* Type;
         const TCHAR* Name;
+        const TCHAR* Description;
         float Duration;
     };
 
     static const TArray<FChaosEventSpec> ChaosEventSpecs = {
-        { TEXT("emp_storm"),      TEXT("EMP STORM"),      8.f  },
-        { TEXT("crystal_rain"),   TEXT("CRYSTAL RAIN"),   15.f },
-        { TEXT("nexus_overload"), TEXT("NEXUS OVERLOAD"), 8.f  },
+        { TEXT("emp_storm"),      TEXT("EMP STORM"),      TEXT("Energy regen disabled in the EMP zone!"), 8.f  },
+        { TEXT("crystal_rain"),   TEXT("CRYSTAL RAIN"),   TEXT("Bonus crystals raining down!"),           15.f },
+        { TEXT("nexus_overload"), TEXT("NEXUS OVERLOAD"), TEXT("All base shields down — rush the enemy!"), 8.f  },
     };
 
     static constexpr float ChaosEventInterval = 30.f;
+    static constexpr float ChaosZoneMargin = 200.f;
 }
 
 ACyberTrinityGameState::ACyberTrinityGameState()
@@ -229,16 +231,17 @@ void ACyberTrinityGameState::TriggerRandomChaosEvent()
 
     if (ChaosEventType == TEXT("emp_storm"))
     {
-        // Pick a random point in the play area (assumes 1920×1080 for now)
+        // Place zone within play area using margin inset
+        const float Bound = PlayAreaHalfExtent - ChaosZoneMargin;
         ChaosEventLocation = FVector(
-            FMath::RandRange(200.f, 1720.f),
-            FMath::RandRange(200.f, 880.f),
+            FMath::RandRange(-Bound, Bound),
+            FMath::RandRange(-Bound, Bound),
             0.f);
         ChaosEventRadius = FMath::RandRange(120.f, 180.f);
     }
 
     const FText Msg = FText::FromString(
-        FString::Printf(TEXT("%s has begun!"), *ChaosEventName));
+        FString::Printf(TEXT("%s: %s"), *ChaosEventName, Spec.Description));
     OnEventFeedEntry.Broadcast(Msg);
 }
 
