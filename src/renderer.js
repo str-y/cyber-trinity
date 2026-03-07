@@ -105,6 +105,9 @@ export class Renderer {
 
     // ── Vignette / atmospheric overlay ─────────────────────────────────────
     this._drawVignette(W, H);
+
+    // ── Minimap ────────────────────────────────────────────────────────────
+    this._drawMinimap(world, W, H);
   }
 
   // ── Grid ──────────────────────────────────────────────────────────────────
@@ -920,5 +923,103 @@ export class Renderer {
     grad.addColorStop(1, 'rgba(0,0,0,0.62)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Minimap ───────────────────────────────────────────────────────────────
+
+  _drawMinimap(world, W, H) {
+    const ctx    = this.ctx;
+    const mapW   = 160;
+    const mapH   = 110;
+    const margin = 12;
+    // Bottom-right HUD ability panel is ~104 px tall + 18 px CSS bottom offset
+    const ABILITY_PANEL_CLEARANCE = 140;
+    const x0     = W - mapW - margin;
+    const y0     = H - mapH - ABILITY_PANEL_CLEARANCE;
+    const wW     = world.width;
+    const wH     = world.height;
+
+    // Map world coordinates → minimap pixel coordinates
+    const mx = (wx) => x0 + (wx / wW) * mapW;
+    const my = (wy) => y0 + (wy / wH) * mapH;
+
+    ctx.save();
+
+    // ── Background panel ─────────────────────────────────────────────────
+    ctx.fillStyle   = 'rgba(2,8,20,0.72)';
+    ctx.strokeStyle = 'rgba(80,140,255,0.30)';
+    ctx.lineWidth   = 1;
+    ctx.fillRect(x0, y0, mapW, mapH);
+    ctx.strokeRect(x0, y0, mapW, mapH);
+
+    // Clip subsequent drawing to the minimap rectangle
+    ctx.beginPath();
+    ctx.rect(x0, y0, mapW, mapH);
+    ctx.clip();
+
+    // ── Home bases (large dots) ──────────────────────────────────────────
+    for (const base of Object.values(world.bases)) {
+      const f = FACTIONS[base.faction];
+      const { r, g, b } = hexToRgb(f.color);
+      ctx.fillStyle   = `rgba(${r},${g},${b},0.95)`;
+      ctx.shadowBlur  = 8;
+      ctx.shadowColor = f.color;
+      ctx.beginPath();
+      ctx.arc(mx(base.x), my(base.y), 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── TriLock bases (medium dots) ──────────────────────────────────────
+    if (world.trilocks) {
+      for (const tl of world.trilocks) {
+        const color = tl.faction ? FACTIONS[tl.faction].color : '#666677';
+        const { r, g, b } = hexToRgb(color);
+        ctx.fillStyle  = `rgba(${r},${g},${b},0.75)`;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = color;
+        ctx.beginPath();
+        ctx.arc(mx(tl.x), my(tl.y), 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // ── Crystals (white, blinking) ────────────────────────────────────────
+    const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
+    for (const crystal of world.crystals) {
+      if (crystal.delivered) continue;
+      const tColor = crystal.tierColor ?? '#a0d4ff';
+      const { r, g, b } = hexToRgb(tColor);
+      ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
+      ctx.beginPath();
+      ctx.arc(mx(crystal.x), my(crystal.y), 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── Agents (small faction-coloured dots) ──────────────────────────────
+    for (const player of world.players) {
+      if (!player.alive) continue;
+      const f = FACTIONS[player.faction];
+      const { r, g, b } = hexToRgb(f.color);
+      ctx.fillStyle  = `rgba(${r},${g},${b},0.95)`;
+      ctx.shadowBlur = 3;
+      ctx.shadowColor = f.color;
+      ctx.beginPath();
+      ctx.arc(mx(player.x), my(player.y), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // ── "MAP" label (outside clip region) ────────────────────────────────
+    ctx.save();
+    ctx.fillStyle    = 'rgba(80,140,255,0.50)';
+    ctx.font         = 'bold 7px "Courier New", monospace';
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('MAP', x0 + 4, y0 + 3);
+    ctx.restore();
   }
 }
