@@ -423,3 +423,30 @@ html, body {
   min-width: 28px;
   text-align: right;
 }
+
+/* ── Match timer ── */
+#match-timer {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 10, 30, 0.70);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 4px 14px;
+  backdrop-filter: blur(6px);
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #a0d4ff;
+  text-shadow: 0 0 8px rgba(160, 212, 255, 0.4);
+}
+
+/* ── Leading faction indicator (hate control) ── */
+.score-block.leading {
+  animation: hateGlow 1.2s ease-in-out infinite alternate;
+}
+@keyframes hateGlow {
+  from { filter: brightness(1); }
+  to   { filter: brightness(1.5) drop-shadow(0 0 6px currentColor); }
+}

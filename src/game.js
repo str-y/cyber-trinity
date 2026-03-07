@@ -1,21 +1,27 @@
 /**
  * game.js
  * Main game world — state management, update loop, entity spawning.
+ *
+ * Battle Trinity edition: 3-team time-limited jewel-control action game
+ * with capturable TriLock bases, value-tiered jewels, job system and hate control.
  */
 
-import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS, PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS } from './entities.js';
+import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS,
+         PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS,
+         CAPTURE_RANGE, MAX_CARRY } from './entities.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 
 const RAIN_COUNT      = 220;
-const CRYSTAL_COUNT   = 10;
+const CRYSTAL_COUNT   = 12;
+const TRILOCK_COUNT   = 5;             // neutral capturable bases
 const DATA_STREAM_COUNT = 30;
 const AI_ABILITY_CHANCE = 0.008;       // per-agent per-frame probability (~once every 12 s)
 const PROJECTILE_HIT_TOLERANCE = 4;    // extra px added to collision radii
 const KILL_SCORE = 5;
 const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
-const SCORE_LIMIT = 200;
+const MATCH_DURATION = 300;            // 5-minute match (seconds)
 
 // ── Chaos Events ─────────────────────────────────────────────────────────────
 const CHAOS_EVENT_INTERVAL = 30;       // seconds between events
@@ -92,13 +98,14 @@ export class Game {
     this.height = 0;
 
     // World state
-    this.bases       = {};   // { blue, green, red }
+    this.bases       = {};   // home bases { blue, green, red }
+    this.trilocks    = [];   // neutral capturable TriLock bases
     this.players     = [];
     this.crystals    = [];
     this.sparks      = [];
     this.dataStreams  = [];
     this.rain        = [];
-    this.scores      = { blue: 30, green: 85, red: 55 };  // pre-seeded per spec
+    this.scores      = { blue: 0, green: 0, red: 0 };
     this.stats       = {
       blue: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
       green: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
@@ -111,6 +118,7 @@ export class Game {
     this.winnerFaction = null;
     this.victoryTimer = 0;
     this.elapsed = 0;
+    this.matchTimer = MATCH_DURATION;   // countdown (seconds)
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({
       ...c,
@@ -130,6 +138,9 @@ export class Game {
     this.chaosEvent = null;          // active event object or null
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;  // countdown to next event
     this._crystalRainAccum = 0;      // accumulator for crystal rain spawns
+
+    // ── Jewel respawn timer ─────────────────────────────────────────────────
+    this._jewelRespawnAccum = 0;
   }
 
   // ── Feature contract accessor (used by HUD and renderer) ─────────────────
@@ -155,6 +166,7 @@ export class Game {
     // Reposition bases on resize
     if (Object.keys(this.bases).length > 0) {
       this._positionBases();
+      if (this.trilocks.length > 0) this._positionTriLocks();
     }
   }
 
@@ -163,8 +175,11 @@ export class Game {
   _spawn() {
     const W = this.width, H = this.height;
 
-    // ── Bases (triangle layout) ───────────────────────────────────────────
+    // ── Home bases (triangle layout, un-capturable) ─────────────────────
     this._positionBases();
+
+    // ── TriLock neutral bases ───────────────────────────────────────────
+    this._spawnTriLocks();
 
     // ── Players (5 per faction) ───────────────────────────────────────────
     for (const faction of ['blue', 'green', 'red']) {
@@ -185,13 +200,8 @@ export class Game {
     this.localPlayer = this.players.find(p => p.faction === 'blue') ?? null;
     if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
 
-    // ── Memory crystals ───────────────────────────────────────────────────
-    for (let i = 0; i < CRYSTAL_COUNT; i++) {
-      this.crystals.push(new MemoryCrystal(
-        60 + Math.random() * (W - 120),
-        60 + Math.random() * (H - 120),
-      ));
-    }
+    // ── Jewels (value-tiered, centre-weighted) ─────────────────────────
+    this._spawnInitialJewels();
 
     // ── Rain ──────────────────────────────────────────────────────────────
     for (let i = 0; i < RAIN_COUNT; i++) {
@@ -232,10 +242,83 @@ export class Game {
         this.bases[faction].x = pos.x;
         this.bases[faction].y = pos.y;
       } else {
-        const base = new Base(faction, pos.x, pos.y);
+        const base = new Base(faction, pos.x, pos.y, true);  // isHome = true
         this.bases[faction] = base;
       }
     }
+  }
+
+  /** Spawn neutral TriLock bases in a ring around the centre of the map. */
+  _spawnTriLocks() {
+    if (this.trilocks.length > 0) {
+      // Reposition on resize
+      this._positionTriLocks();
+      return;
+    }
+    const W = this.width, H = this.height;
+    const cx = W / 2, cy = H / 2;
+    const ringR = Math.min(W, H) * 0.18;
+    for (let i = 0; i < TRILOCK_COUNT; i++) {
+      const angle = (i / TRILOCK_COUNT) * Math.PI * 2 - Math.PI / 2;
+      const tx = cx + Math.cos(angle) * ringR;
+      const ty = cy + Math.sin(angle) * ringR;
+      this.trilocks.push(new Base(null, tx, ty, false));
+    }
+  }
+
+  _positionTriLocks() {
+    const W = this.width, H = this.height;
+    const cx = W / 2, cy = H / 2;
+    const ringR = Math.min(W, H) * 0.18;
+    for (let i = 0; i < this.trilocks.length; i++) {
+      const angle = (i / this.trilocks.length) * Math.PI * 2 - Math.PI / 2;
+      this.trilocks[i].x = cx + Math.cos(angle) * ringR;
+      this.trilocks[i].y = cy + Math.sin(angle) * ringR;
+    }
+  }
+
+  /**
+   * Spawn jewels with value tiers. Higher-value jewels spawn closer to the centre.
+   * Uses the JEWEL_TIERS weight distribution and distance-from-centre bias.
+   */
+  _spawnInitialJewels() {
+    const W = this.width, H = this.height;
+    const cx = W / 2, cy = H / 2;
+    for (let i = 0; i < CRYSTAL_COUNT; i++) {
+      this.crystals.push(this._createJewel(cx, cy, W, H));
+    }
+  }
+
+  _createJewel(cx, cy, W, H) {
+    // Pick tier using weighted random
+    const r = Math.random();
+    let cumulative = 0;
+    let tier = JEWEL_TIERS[0];
+    for (const t of JEWEL_TIERS) {
+      cumulative += t.weight;
+      if (r <= cumulative) { tier = t; break; }
+    }
+
+    // Position: higher-tier jewels spawn closer to centre
+    let x, y;
+    if (tier.tier === 'legendary') {
+      // Centre zone (inner 30%)
+      const spread = Math.min(W, H) * 0.15;
+      x = cx + (Math.random() - 0.5) * spread * 2;
+      y = cy + (Math.random() - 0.5) * spread * 2;
+    } else if (tier.tier === 'rare') {
+      // Mid zone (inner 50%)
+      const spread = Math.min(W, H) * 0.25;
+      x = cx + (Math.random() - 0.5) * spread * 2;
+      y = cy + (Math.random() - 0.5) * spread * 2;
+    } else {
+      // Full field
+      x = 60 + Math.random() * (W - 120);
+      y = 60 + Math.random() * (H - 120);
+    }
+    x = Math.max(60, Math.min(W - 60, x));
+    y = Math.max(60, Math.min(H - 60, y));
+    return new MemoryCrystal(x, y, tier);
   }
 
   _initDataStreams() {
@@ -279,9 +362,13 @@ export class Game {
       return;
     }
     this.elapsed += dt;
+    this.matchTimer -= dt;
 
-    // Bases
+    // Home bases
     for (const base of Object.values(this.bases)) base.update(dt);
+
+    // TriLock capture logic
+    this._updateTriLocks(dt);
 
     // Players
     for (const player of this.players) {
@@ -354,17 +441,32 @@ export class Game {
     // Chaos events (EMP Storm, Crystal Rain, Nexus Overload)
     this._updateChaosEvents(dt);
 
-    // Re-spawn delivered crystals
+    // Re-spawn delivered jewels (value-tiered, centre-weighted)
     const active = this.crystals.filter(c => !c.delivered);
     if (active.length < CRYSTAL_COUNT * 0.5) {
       this.crystals = this.crystals.filter(c => !c.delivered);
+      const cx = this.width / 2, cy = this.height / 2;
       const toSpawn = CRYSTAL_COUNT - this.crystals.length;
       for (let i = 0; i < toSpawn; i++) {
-        this.crystals.push(new MemoryCrystal(
-          60 + Math.random() * (this.width  - 120),
-          60 + Math.random() * (this.height - 120),
-        ));
+        this.crystals.push(this._createJewel(cx, cy, this.width, this.height));
       }
+    }
+
+    // Time-based high-value jewel injection (every 20 s a bonus rare/legendary spawns at centre)
+    this._jewelRespawnAccum += dt;
+    if (this._jewelRespawnAccum >= 20) {
+      this._jewelRespawnAccum = 0;
+      const cx = this.width / 2, cy = this.height / 2;
+      const bonusTier = Math.random() < 0.3 ? JEWEL_TIERS[2] : JEWEL_TIERS[1];
+      const spread = Math.min(this.width, this.height) * 0.08;
+      const bx = cx + (Math.random() - 0.5) * spread * 2;
+      const by = cy + (Math.random() - 0.5) * spread * 2;
+      this.crystals.push(new MemoryCrystal(bx, by, bonusTier));
+      this.events.push({
+        text: `💎 A ${bonusTier.tier.toUpperCase()} JEWEL appeared in the centre!`,
+        faction: 'blue',
+        ttl: 3,
+      });
     }
 
     // Sparks
@@ -414,7 +516,7 @@ export class Game {
         const base = this.bases[player.faction];
         player.x = base.x + (Math.random() - 0.5) * 60;
         player.y = base.y + (Math.random() - 0.5) * 60;
-        player.carrying = null;
+        player.carrying = [];
       }
       return;
     }
@@ -439,29 +541,37 @@ export class Game {
     player.y = Math.max(PLAYER_RADIUS, Math.min(this.height - PLAYER_RADIUS, player.y));
     player._updateTrail();
 
-    if (player.carrying) {
-      const base = this.bases[player.faction];
-      if (Math.hypot(player.x - base.x, player.y - base.y) < BASE_RADIUS - 5) {
-        base.crystalsStored++;
-        this.scores[player.faction] += 10;
-        this.stats[player.faction].crystals++;
+    // Deliver jewels to any owned base (home or captured TriLock)
+    if (player.carrying.length > 0) {
+      const deliveryBase = this._nearestOwnedBase(player.x, player.y, player.faction);
+      if (deliveryBase && Math.hypot(player.x - deliveryBase.x, player.y - deliveryBase.y) < BASE_RADIUS - 5) {
+        let totalScore = 0;
+        for (const jewel of player.carrying) {
+          const pts = deliveryBase.deliverJewel(jewel.value);
+          totalScore += pts;
+          jewel.delivered = true;
+        }
+        this.scores[player.faction] += totalScore;
+        this.stats[player.faction].crystals += player.carrying.length;
         this.events.push({
-          text: `${player.faction.toUpperCase()} PLAYER delivered CRYSTAL (+10)`,
+          text: `${player.faction.toUpperCase()} PLAYER delivered ${player.carrying.length} JEWEL${player.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
           faction: player.faction,
           ttl: 3,
         });
-        player.carrying.delivered = true;
-        player.carrying = null;
+        player.carrying = [];
       }
-      return;
     }
 
-    const nearest = this._nearestFreeCrystal(player.x, player.y);
-    if (!nearest) return;
-    const d = Math.hypot(player.x - nearest.x, player.y - nearest.y);
-    if (d < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
-      nearest.carrier = player;
-      player.carrying = nearest;
+    // Pick up nearby jewels (up to MAX_CARRY)
+    if (player.carrying.length < MAX_CARRY) {
+      const nearest = this._nearestFreeCrystal(player.x, player.y);
+      if (nearest) {
+        const d = Math.hypot(player.x - nearest.x, player.y - nearest.y);
+        if (d < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
+          nearest.carrier = player;
+          player.carrying.push(nearest);
+        }
+      }
     }
   }
 
@@ -551,16 +661,14 @@ export class Game {
     if (this.chaosEvent) {
       this.chaosEvent.remaining -= dt;
 
-      // Crystal Rain: spawn extra crystals periodically
+      // Crystal Rain: spawn extra jewels periodically (value-tiered)
       if (this.chaosEvent.type === 'crystal_rain') {
         this._crystalRainAccum += dt;
         const interval = this.chaosEvent.spawnInterval;
         while (this._crystalRainAccum >= interval) {
           this._crystalRainAccum -= interval;
-          this.crystals.push(new MemoryCrystal(
-            60 + Math.random() * (this.width - 120),
-            60 + Math.random() * (this.height - 120),
-          ));
+          const cx = this.width / 2, cy = this.height / 2;
+          this.crystals.push(this._createJewel(cx, cy, this.width, this.height));
         }
       }
 
@@ -617,7 +725,9 @@ export class Game {
   _recordElimination(victim, killerFaction, reason = 'eliminated') {
     victim.alive = false;
     victim.respawnTimer = 5;
-    if (victim.carrying) { victim.carrying.carrier = null; victim.carrying = null; }
+
+    // Death penalty: drop ALL carried jewels
+    victim.dropAllJewels(this);
 
     this.stats[killerFaction].kills++;
     this.stats[victim.faction].deaths++;
@@ -648,18 +758,20 @@ export class Game {
 
   _checkMatchEnd() {
     if (this.matchEnded) return;
-    const ranking = ['blue', 'green', 'red']
-      .map(faction => ({ faction, score: this.scores[faction] ?? 0 }))
-      .sort((a, b) => b.score - a.score);
-    if ((ranking[0]?.score ?? 0) < SCORE_LIMIT) return;
-    this.matchEnded = true;
-    this.winnerFaction = ranking[0].faction;
-    this.victoryTimer = 5;
-    this.events.push({
-      text: `${this.winnerFaction.toUpperCase()} wins the match`,
-      faction: this.winnerFaction,
-      ttl: 5,
-    });
+    // Time-based match end (5 minutes) — winner has the most points
+    if (this.matchTimer <= 0) {
+      this.matchEnded = true;
+      const ranking = ['blue', 'green', 'red']
+        .map(faction => ({ faction, score: this.scores[faction] ?? 0 }))
+        .sort((a, b) => b.score - a.score);
+      this.winnerFaction = ranking[0].faction;
+      this.victoryTimer = 5;
+      this.events.push({
+        text: `⏰ TIME UP! ${this.winnerFaction.toUpperCase()} wins the match`,
+        faction: this.winnerFaction,
+        ttl: 5,
+      });
+    }
   }
 
   _restart() {
@@ -674,11 +786,13 @@ export class Game {
     this.winnerFaction = null;
     this.victoryTimer = 0;
     this.elapsed = 0;
+    this.matchTimer = MATCH_DURATION;
     this.events = [];
     this.projectiles = [];
     this.sparks = [];
     this.damageLedger = new Map();
     this.factionBuffs = {};
+    this._jewelRespawnAccum = 0;
 
     // Reset chaos events
     this.chaosEvent = null;
@@ -704,24 +818,28 @@ export class Game {
       player.energy = 100;
       player.alive = true;
       player.respawnTimer = 0;
-      player.carrying = null;
+      player.carrying = [];
       player.cooldown = Math.random() * player.abilityMax;
       player.trailPoints = [];
     }
 
-    // Reset bases
+    // Reset home bases
     for (const base of Object.values(this.bases)) {
       base.crystalsStored = 0;
     }
 
-    // Reset crystals
-    this.crystals = [];
-    for (let i = 0; i < CRYSTAL_COUNT; i++) {
-      this.crystals.push(new MemoryCrystal(
-        60 + Math.random() * (this.width - 120),
-        60 + Math.random() * (this.height - 120),
-      ));
+    // Reset TriLocks to neutral
+    for (const tl of this.trilocks) {
+      tl.faction = null;
+      tl.captureFaction = null;
+      tl.captureProgress = 0;
+      tl.level = 0;
+      tl.crystalsStored = 0;
     }
+
+    // Reset jewels (value-tiered)
+    this.crystals = [];
+    this._spawnInitialJewels();
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────
@@ -746,5 +864,75 @@ export class Game {
       if (d < bestD) { bestD = d; best = p; }
     }
     return best;
+  }
+
+  /** Return the nearest alive enemy belonging to a specific faction. */
+  _nearestEnemyOfFaction(x, y, targetFaction) {
+    let best = null, bestD = Infinity;
+    for (const p of this.players) {
+      if (p.faction !== targetFaction || !p.alive) continue;
+      const dx = p.x - x, dy = p.y - y;
+      const d  = Math.sqrt(dx * dx + dy * dy);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
+
+  /** Return the nearest base (home or TriLock) owned by the given faction. */
+  _nearestOwnedBase(x, y, faction) {
+    let best = null, bestD = Infinity;
+    // Home base is always available
+    const home = this.bases[faction];
+    if (home) {
+      const d = Math.sqrt((home.x - x) ** 2 + (home.y - y) ** 2);
+      best = home;
+      bestD = d;
+    }
+    // Also consider captured TriLocks
+    for (const tl of this.trilocks) {
+      if (tl.faction !== faction) continue;
+      const d = Math.sqrt((tl.x - x) ** 2 + (tl.y - y) ** 2);
+      if (d < bestD) { bestD = d; best = tl; }
+    }
+    return best;
+  }
+
+  /** Return the faction currently in the lead (highest score). */
+  _leadingFaction() {
+    const ranking = ['blue', 'green', 'red']
+      .map(f => ({ f, s: this.scores[f] ?? 0 }))
+      .sort((a, b) => b.s - a.s);
+    // Only return a leader if they are ahead by at least 10 points
+    if (ranking[0].s > ranking[1].s + 10) return ranking[0].f;
+    return null;
+  }
+
+  // ── TriLock capture update ───────────────────────────────────────────────
+
+  _updateTriLocks(dt) {
+    for (const tl of this.trilocks) {
+      tl.update(dt);
+
+      // Count alive players inside capture range per faction
+      const counts = { blue: 0, green: 0, red: 0 };
+      for (const p of this.players) {
+        if (!p.alive) continue;
+        const d = Math.sqrt((p.x - tl.x) ** 2 + (p.y - tl.y) ** 2);
+        if (d < CAPTURE_RANGE) counts[p.faction]++;
+      }
+
+      const prevFaction = tl.faction;
+      tl.tryCapture(counts, dt);
+
+      // Emit event on faction change
+      if (tl.faction && tl.faction !== prevFaction) {
+        this.events.push({
+          text: `🏰 ${tl.faction.toUpperCase()} captured a TRILOCK!`,
+          faction: tl.faction,
+          ttl: 3,
+        });
+        this.sparks.push(...Particle.burst(tl.x, tl.y, FACTIONS[tl.faction].color, 12));
+      }
+    }
   }
 }
