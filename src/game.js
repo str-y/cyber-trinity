@@ -17,6 +17,40 @@ const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
 const SCORE_LIMIT = 200;
 
+// ── Chaos Events ─────────────────────────────────────────────────────────────
+const CHAOS_EVENT_INTERVAL = 30;       // seconds between events
+const CHAOS_EVENT_INITIAL_DELAY = 15;  // first event after 15 s
+
+const CHAOS_EVENTS = [
+  {
+    type: 'emp_storm',
+    name: 'EMP STORM',
+    duration: 8,
+    description: 'Energy regen disabled in the EMP zone!',
+    color: '#ffcc00',
+    emoji: '⚡',
+  },
+  {
+    type: 'crystal_rain',
+    name: 'CRYSTAL RAIN',
+    duration: 15,
+    description: 'Bonus crystals raining down!',
+    color: '#a0d4ff',
+    emoji: '💎',
+    spawnInterval: 1.5,            // spawn a bonus crystal every 1.5 s
+  },
+  {
+    type: 'nexus_overload',
+    name: 'NEXUS OVERLOAD',
+    duration: 8,
+    description: 'All base shields down — rush the enemy!',
+    color: '#ff66ff',
+    emoji: '💥',
+  },
+];
+
+const CHAOS_ZONE_MARGIN = 80;      // px inset from canvas edge for EMP zone placement
+
 // Feature contract chain — each contract triggers when the actor reaches the score threshold.
 // On completion the actor receives a bonus and their agents receive a timed buff.
 const FEATURE_CONTRACTS = [
@@ -91,6 +125,11 @@ export class Game {
     this.input = { up: false, down: false, left: false, right: false, ability: false };
     this._abilityLatch = false;
     this._bindInput();
+
+    // ── Chaos Events ───────────────────────────────────────────────────────
+    this.chaosEvent = null;          // active event object or null
+    this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;  // countdown to next event
+    this._crystalRainAccum = 0;      // accumulator for crystal rain spawns
   }
 
   // ── Feature contract accessor (used by HUD and renderer) ─────────────────
@@ -248,10 +287,21 @@ export class Game {
     for (const player of this.players) {
       if (player.isPlayerControlled) this._updateLocalPlayer(player, dt);
       else player.update(dt, this);
-      // Energy regeneration (buffed by faction overclock)
+      // Energy regeneration (buffed by faction overclock, blocked by EMP Storm)
       if (player.alive && player.energy < 100) {
-        const regenMult = this.factionBuffs[player.faction]?.regenMult ?? 1;
-        player.energy = Math.min(100, player.energy + 8 * regenMult * dt);
+        let regenBlocked = false;
+        if (this.chaosEvent?.type === 'emp_storm') {
+          const ce = this.chaosEvent;
+          const dx = player.x - ce.x;
+          const dy = player.y - ce.y;
+          if (Math.sqrt(dx * dx + dy * dy) < ce.radius) {
+            regenBlocked = true;
+          }
+        }
+        if (!regenBlocked) {
+          const regenMult = this.factionBuffs[player.faction]?.regenMult ?? 1;
+          player.energy = Math.min(100, player.energy + 8 * regenMult * dt);
+        }
       }
       // Faction heal-over-time buff (Deploy Firewall)
       const healBuff = this.factionBuffs[player.faction]?.healPerSec;
@@ -300,6 +350,9 @@ export class Game {
 
     // Next feature contract (who/when/what + completion effects)
     this._updateNextFeature(dt);
+
+    // Chaos events (EMP Storm, Crystal Rain, Nexus Overload)
+    this._updateChaosEvents(dt);
 
     // Re-spawn delivered crystals
     const active = this.crystals.filter(c => !c.delivered);
@@ -491,6 +544,70 @@ export class Game {
     }
   }
 
+  // ── Chaos Events ─────────────────────────────────────────────────────────
+
+  _updateChaosEvents(dt) {
+    // Tick active event
+    if (this.chaosEvent) {
+      this.chaosEvent.remaining -= dt;
+
+      // Crystal Rain: spawn extra crystals periodically
+      if (this.chaosEvent.type === 'crystal_rain') {
+        this._crystalRainAccum += dt;
+        const interval = this.chaosEvent.spawnInterval;
+        while (this._crystalRainAccum >= interval) {
+          this._crystalRainAccum -= interval;
+          this.crystals.push(new MemoryCrystal(
+            60 + Math.random() * (this.width - 120),
+            60 + Math.random() * (this.height - 120),
+          ));
+        }
+      }
+
+      if (this.chaosEvent.remaining <= 0) {
+        this.events.push({
+          text: `${this.chaosEvent.emoji} ${this.chaosEvent.name} has ended`,
+          faction: 'blue',
+          ttl: 3,
+        });
+        this.chaosEvent = null;
+        this.chaosEventTimer = CHAOS_EVENT_INTERVAL;
+      }
+      return;
+    }
+
+    // Countdown to next event
+    this.chaosEventTimer -= dt;
+    if (this.chaosEventTimer <= 0) {
+      this._triggerChaosEvent();
+    }
+  }
+
+  _triggerChaosEvent() {
+    const spec = CHAOS_EVENTS[Math.floor(Math.random() * CHAOS_EVENTS.length)];
+    const event = {
+      ...spec,
+      remaining: spec.duration,
+    };
+
+    // EMP Storm: pick a random zone on the map
+    if (spec.type === 'emp_storm') {
+      const m = CHAOS_ZONE_MARGIN;
+      event.x = m + Math.random() * (this.width - m * 2);
+      event.y = m + Math.random() * (this.height - m * 2);
+      event.radius = 120 + Math.random() * 60;  // 120-180 px radius
+    }
+
+    this.chaosEvent = event;
+    this._crystalRainAccum = 0;
+
+    this.events.push({
+      text: `${spec.emoji} ${spec.name}: ${spec.description}`,
+      faction: 'blue',
+      ttl: 4,
+    });
+  }
+
   _registerDamage(target, attackerFaction) {
     if (!target || !attackerFaction) return;
     if (!this.damageLedger.has(target)) this.damageLedger.set(target, new Map());
@@ -562,6 +679,11 @@ export class Game {
     this.sparks = [];
     this.damageLedger = new Map();
     this.factionBuffs = {};
+
+    // Reset chaos events
+    this.chaosEvent = null;
+    this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;
+    this._crystalRainAccum = 0;
 
     // Reset feature contracts
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({

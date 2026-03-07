@@ -372,3 +372,54 @@ html, body {
 
 .feature-status-pending { color: #4aa8ff !important; }
 .feature-status-completed { color: #50ff78 !important; }
+
+/* ── Chaos event banner ── */
+#chaos-event-banner {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 10, 30, 0.80);
+  border: 1px solid rgba(255, 102, 255, 0.5);
+  border-radius: 4px;
+  padding: 6px 16px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 16px rgba(255, 102, 255, 0.2);
+  z-index: 10;
+}
+
+.chaos-emoji {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.chaos-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chaos-name {
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px currentColor;
+}
+
+.chaos-desc {
+  font-size: 9px;
+  opacity: 0.65;
+  letter-spacing: 1px;
+}
+
+.chaos-timer {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px currentColor;
+  min-width: 28px;
+  text-align: right;
+}

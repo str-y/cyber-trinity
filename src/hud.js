@@ -100,6 +100,13 @@ export class HUD {
       `;
     }
 
+    // ── Chaos event banner ─────────────────────────────────────────────
+    const chaosBanner = document.getElementById('chaos-event-banner');
+    if (chaosBanner) {
+      chaosBanner.innerHTML = '';  // built dynamically in update
+      this._chaosBannerEl = chaosBanner;
+    }
+
     // ── Match-end scoreboard ───────────────────────────────────────────────
     const scoreboard = document.getElementById('match-scoreboard');
     if (scoreboard) {
@@ -165,6 +172,7 @@ export class HUD {
 
     // Event feed
     this._updateFeed(world);
+    this._updateChaosEvent(world);
     this._updateScoreboard(world);
   }
 
@@ -240,6 +248,25 @@ export class HUD {
         ? 'feature-status-completed'
         : 'feature-status-pending';
     }
+  }
+
+  _updateChaosEvent(world) {
+    if (!this._chaosBannerEl) return;
+    const event = world.chaosEvent;
+    if (!event) {
+      this._chaosBannerEl.style.display = 'none';
+      return;
+    }
+    this._chaosBannerEl.style.display = 'flex';
+    this._chaosBannerEl.style.borderColor = event.color;
+    this._chaosBannerEl.innerHTML = `
+      <span class="chaos-emoji">${event.emoji}</span>
+      <div class="chaos-info">
+        <span class="chaos-name" style="color:${event.color}">${event.name}</span>
+        <span class="chaos-desc">${event.description}</span>
+      </div>
+      <span class="chaos-timer" style="color:${event.color}">${Math.ceil(event.remaining)}s</span>
+    `;
   }
 
   _updateScoreboard(world) {

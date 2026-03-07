@@ -62,6 +62,10 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Match")
     int32 ScoreLimit = 200;
 
+    /** Half-extent of the play area (used for chaos event placement). */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Match")
+    float PlayAreaHalfExtent = 3000.f;
+
     // ── Next feature contract ───────────────────────────────────────────────
 
     // Archive maps to Blue in the browser preview implementation.
@@ -89,6 +93,31 @@ public:
     UFUNCTION()
     void OnRep_NextFeatureCompleted();
 
+    // ── Chaos Events (Map Events) ──────────────────────────────────────────
+
+    /** Active chaos event type: "none", "emp_storm", "crystal_rain", "nexus_overload". */
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "ChaosEvent")
+    FString ChaosEventType = TEXT("none");
+
+    /** Human-readable name of the active chaos event. */
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "ChaosEvent")
+    FString ChaosEventName;
+
+    /** Seconds remaining for the active chaos event. */
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "ChaosEvent")
+    float ChaosEventRemaining = 0.f;
+
+    /** World-space centre of the EMP Storm zone (only relevant when type is emp_storm). */
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "ChaosEvent")
+    FVector ChaosEventLocation = FVector::ZeroVector;
+
+    /** Radius of the EMP Storm zone. */
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "ChaosEvent")
+    float ChaosEventRadius = 0.f;
+
+    /** Countdown until the next chaos event fires. */
+    float ChaosEventCooldown = 15.f;
+
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
@@ -100,6 +129,9 @@ private:
     void AdvanceNextFeatureContract();
     /** Applies contract parameters (faction/trigger/bonus/action) for the given index. */
     void SetFeatureContractByIndex(int32 FeatureIndex);
+
+    /** Selects and activates a random chaos event. */
+    void TriggerRandomChaosEvent();
 
     // Scores indexed by EFaction (cast to uint8)
     UPROPERTY(ReplicatedUsing = OnRep_Scores)
