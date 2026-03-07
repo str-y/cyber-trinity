@@ -48,6 +48,41 @@
       <!-- Match-end scoreboard -->
       <div id="match-scoreboard"></div>
 
+      <!-- Settings panel -->
+      <div id="settings-panel" aria-hidden="true">
+        <div class="settings-header">
+          <div class="panel-title blue">SYSTEM SETTINGS</div>
+          <span class="settings-hint">ESC</span>
+        </div>
+
+        <label class="setting-row" for="setting-game-speed">
+          <span class="setting-label">GAME SPEED</span>
+          <select id="setting-game-speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+
+        <label class="setting-row" for="setting-effect-quality">
+          <span class="setting-label">EFFECT QUALITY</span>
+          <select id="setting-effect-quality">
+            <option value="low">LOW</option>
+            <option value="high" selected>HIGH</option>
+          </select>
+        </label>
+
+        <label class="setting-row setting-toggle" for="setting-hud-visible">
+          <span class="setting-label">HUD DISPLAY</span>
+          <input id="setting-hud-visible" type="checkbox" checked />
+        </label>
+
+        <label class="setting-row setting-toggle" for="setting-crt-enabled">
+          <span class="setting-label">CRT EFFECT</span>
+          <input id="setting-crt-enabled" type="checkbox" checked />
+        </label>
+      </div>
+
     </div><!-- /hud -->
 
   </div><!-- /game-container -->
