@@ -55,14 +55,14 @@ export class HUD {
 
     const legend = document.getElementById('faction-legend');
     if (!legend) return;
-    const roles  = ['⚔️War ·🔮Mag ·💚Heal ·💨Scout', '⚔️War ·🔮Mag ·💚Heal ·💨Scout', '⚔️War ·🔮Mag ·💚Heal ·💨Scout'];
+    const jobSummary = '⚔️War ·🔮Mag ·💚Heal ·💨Scout';
     factions.forEach((f, i) => {
       const row = document.createElement('div');
       row.className = 'legend-row';
       row.innerHTML = `
         <div class="legend-dot ${f}"></div>
         <span class="${f}" style="opacity:0.85">${names[i]}</span>
-        <span style="opacity:0.45;font-size:9px">&nbsp;— ${roles[i]}</span>
+        <span style="opacity:0.45;font-size:9px">&nbsp;— ${jobSummary}</span>
       `;
       legend.appendChild(row);
     });

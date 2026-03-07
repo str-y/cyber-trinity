@@ -345,7 +345,8 @@ export class Renderer {
     ctx.rotate(crystal.rotAngle);
 
     // Glow (tier-coloured)
-    const { r, g, b } = hexToRgb(tierColor);
+    const rgb = hexToRgb(tierColor);
+    const r = rgb?.r ?? 160, g = rgb?.g ?? 212, b = rgb?.b ?? 255;
     const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 3);
     glow.addColorStop(0, `rgba(${r},${g},${b},0.40)`);
     glow.addColorStop(1, 'rgba(0,0,0,0)');
@@ -864,8 +865,8 @@ export class Renderer {
     ctx.fillStyle = color;
     ctx.font = 'bold 10px "Courier New", monospace';
     ctx.textAlign = 'center';
-    const levelText = tl.level > 0 ? `TRILOCK Lv${tl.level}` : 'TRILOCK';
-    ctx.fillText(levelText, tl.x, tl.y + R + 18);
+    const trilockLabel = tl.level > 0 ? `TRILOCK Lv${tl.level}` : 'TRILOCK';
+    ctx.fillText(trilockLabel, tl.x, tl.y + R + 18);
 
     // Faction name (if captured)
     if (owned) {

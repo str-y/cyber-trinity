@@ -22,6 +22,7 @@ const KILL_SCORE = 5;
 const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
+const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 
 // ── Chaos Events ─────────────────────────────────────────────────────────────
 const CHAOS_EVENT_INTERVAL = 30;       // seconds between events
@@ -457,7 +458,7 @@ export class Game {
     if (this._jewelRespawnAccum >= 20) {
       this._jewelRespawnAccum = 0;
       const cx = this.width / 2, cy = this.height / 2;
-      const bonusTier = Math.random() < 0.3 ? JEWEL_TIERS[2] : JEWEL_TIERS[1];
+      const bonusTier = Math.random() < BONUS_LEGENDARY_CHANCE ? JEWEL_TIERS[2] : JEWEL_TIERS[1];
       const spread = Math.min(this.width, this.height) * 0.08;
       const bx = cx + (Math.random() - 0.5) * spread * 2;
       const by = cy + (Math.random() - 0.5) * spread * 2;
@@ -903,7 +904,8 @@ export class Game {
       .map(f => ({ f, s: this.scores[f] ?? 0 }))
       .sort((a, b) => b.s - a.s);
     // Only return a leader if they are ahead by at least 10 points
-    if (ranking[0].s > ranking[1].s + 10) return ranking[0].f;
+    const second = ranking[1]?.s ?? 0;
+    if (ranking[0].s > second + 10) return ranking[0].f;
     return null;
   }
 

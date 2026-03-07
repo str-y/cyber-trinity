@@ -112,7 +112,7 @@ export const JOBS = {
   },
 };
 
-/** Per-team job assignment for indices 0–4 */
+/** Per-team job assignment for indices 0–4: 2 Warriors, 1 Mage, 1 Healer, 1 Scout */
 const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'warrior'];
 
 export const PLAYER_RADIUS = 9;
@@ -133,6 +133,10 @@ export const CAPTURE_RANGE    = BASE_RADIUS + 20;   // px — how close you must
 export const CAPTURE_SPEED    = 20;   // progress per second per player inside
 export const CAPTURE_MAX      = 100;  // full capture at this value
 export const TRILOCK_MAX_LEVEL = 3;
+
+// ── TriLock level-up thresholds ──────────────────────────────────────────
+const TRILOCK_LEVEL_2_THRESHOLD = 3;   // deliveries to reach Lv2
+const TRILOCK_LEVEL_3_THRESHOLD = 7;   // deliveries to reach Lv3
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
@@ -199,8 +203,8 @@ export class Base {
 
     // Different faction currently has progress → decay first
     if (this.captureFaction && this.captureFaction !== attackFaction) {
-      const decayDef = 1 + (this.level * 0.5);   // higher-level bases resist faster
-      this.captureProgress -= CAPTURE_SPEED * count * dt / decayDef;
+      const levelResistance = 1 + (this.level * 0.5);   // higher-level bases resist faster
+      this.captureProgress -= CAPTURE_SPEED * count * dt / levelResistance;
       if (this.captureProgress <= 0) {
         // Neutralised
         this.captureProgress = 0;
@@ -225,9 +229,9 @@ export class Base {
   /** Deliver jewels → level up the TriLock and return delivery score. */
   deliverJewel(value) {
     this.crystalsStored += 1;
-    // Level-up thresholds: 3 deliveries → Lv2, 7 → Lv3
-    if (this.crystalsStored >= 7 && this.level < 3)      this.level = 3;
-    else if (this.crystalsStored >= 3 && this.level < 2)  this.level = 2;
+    // Level-up thresholds
+    if (this.crystalsStored >= TRILOCK_LEVEL_3_THRESHOLD && this.level < 3) this.level = 3;
+    else if (this.crystalsStored >= TRILOCK_LEVEL_2_THRESHOLD && this.level < 2) this.level = 2;
     // Delivery bonus scales with level: Lv1 ×1, Lv2 ×1.25, Lv3 ×1.5
     const mult = 1 + (this.level - 1) * 0.25;
     return Math.round(value * mult);
