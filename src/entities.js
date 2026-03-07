@@ -255,7 +255,7 @@ export class Player {
     this.trailPoints = [];
     this.glowPulse = Math.random() * Math.PI * 2;
     this.target    = null;           // {x, y} or jewel or base
-    this.state     = 'roam';         // 'roam' | 'attack' | 'carry' | 'defend' | 'capture'
+    this.state     = 'roam';         // 'roam' | 'attack' | 'carry' | 'defend' | 'capture' | 'rally'
     this.attackTimer = 0;
 
     // ── Job system (replaces faction-locked abilities) ─────────────────────
