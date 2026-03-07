@@ -424,6 +424,55 @@ html, body {
   text-align: right;
 }
 
+/* ── Alliance indicator ── */
+#alliance-indicator {
+  position: absolute;
+  top: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 10, 30, 0.80);
+  border: 1px solid rgba(255, 215, 0, 0.45);
+  border-radius: 4px;
+  padding: 6px 16px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 16px rgba(255, 215, 0, 0.15);
+  z-index: 10;
+  animation: alliancePulse 2s ease-in-out infinite alternate;
+}
+
+@keyframes alliancePulse {
+  from { box-shadow: 0 0 8px rgba(255, 215, 0, 0.1); }
+  to   { box-shadow: 0 0 20px rgba(255, 215, 0, 0.3); }
+}
+
+.alliance-emoji {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.alliance-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.alliance-title {
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #ffd700;
+  text-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
+}
+
+.alliance-desc {
+  font-size: 9px;
+  opacity: 0.85;
+  letter-spacing: 1px;
+}
+
 /* ── Match timer ── */
 #match-timer {
   position: absolute;

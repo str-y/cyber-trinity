@@ -24,6 +24,10 @@ const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 
+// ── Alliance system ──────────────────────────────────────────────────────────
+const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
+const ALLIANCE_DISSOLVE_THRESHOLD = 10; // score gap to dissolve alliance (hysteresis)
+
 // ── Chaos Events ─────────────────────────────────────────────────────────────
 const CHAOS_EVENT_INTERVAL = 30;       // seconds between events
 const CHAOS_EVENT_INITIAL_DELAY = 15;  // first event after 15 s
@@ -134,6 +138,10 @@ export class Game {
     this.input = { up: false, down: false, left: false, right: false, ability: false };
     this._abilityLatch = false;
     this._bindInput();
+
+    // ── Alliance (temporary 2-vs-1 pact) ─────────────────────────────────
+    // When active: { members: [faction, faction], target: faction }
+    this.alliance = null;
 
     // ── Chaos Events ───────────────────────────────────────────────────────
     this.chaosEvent = null;          // active event object or null
@@ -371,6 +379,9 @@ export class Game {
     // TriLock capture logic
     this._updateTriLocks(dt);
 
+    // Alliance evaluation (before AI so targeting reflects current pact)
+    this._updateAlliance();
+
     // Players
     for (const player of this.players) {
       if (player.isPlayerControlled) this._updateLocalPlayer(player, dt);
@@ -597,6 +608,7 @@ export class Game {
       // Railshot & Power Dash — hit enemies
       for (const p of this.players) {
         if (!p.alive || p.faction === proj.faction) continue;
+        if (this._isAlly(proj.faction, p.faction)) continue;   // skip allied faction
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
           this._registerDamage(p, proj.faction);
@@ -794,6 +806,7 @@ export class Game {
     this.damageLedger = new Map();
     this.factionBuffs = {};
     this._jewelRespawnAccum = 0;
+    this.alliance = null;
 
     // Reset chaos events
     this.chaosEvent = null;
@@ -860,6 +873,7 @@ export class Game {
     let best = null, bestD = Infinity;
     for (const p of this.players) {
       if (p.faction === myFaction || !p.alive) continue;
+      if (this._isAlly(myFaction, p.faction)) continue;   // skip allied faction
       const dx = p.x - x, dy = p.y - y;
       const d  = Math.sqrt(dx * dx + dy * dy);
       if (d < bestD) { bestD = d; best = p; }
@@ -907,6 +921,53 @@ export class Game {
     const second = ranking[1]?.s ?? 0;
     if (ranking[0].s > second + 10) return ranking[0].f;
     return null;
+  }
+
+  // ── Alliance helpers ──────────────────────────────────────────────────────
+
+  /** Check whether two factions are currently allied. */
+  _isAlly(factionA, factionB) {
+    if (!this.alliance) return false;
+    return this.alliance.members.includes(factionA) &&
+           this.alliance.members.includes(factionB);
+  }
+
+  /** Re-evaluate alliance state every frame (form / dissolve / update). */
+  _updateAlliance() {
+    const ranking = ['blue', 'green', 'red']
+      .map(f => ({ f, s: this.scores[f] ?? 0 }))
+      .sort((a, b) => b.s - a.s);
+    const gap = ranking[0].s - ranking[1].s;
+
+    if (this.alliance) {
+      // Dissolve if the score gap narrows below the dissolve threshold
+      if (gap < ALLIANCE_DISSOLVE_THRESHOLD) {
+        this.events.push({
+          text: '🤝 Alliance dissolved — scores are close!',
+          faction: 'blue', ttl: 4,
+        });
+        this.alliance = null;
+      } else {
+        // Keep alliance in sync with current rankings (leader may have changed)
+        this.alliance.target  = ranking[0].f;
+        this.alliance.members = [ranking[1].f, ranking[2].f];
+      }
+    } else {
+      // Form alliance when top faction runs away with the score
+      if (gap >= ALLIANCE_FORM_THRESHOLD) {
+        this.alliance = {
+          members: [ranking[1].f, ranking[2].f],
+          target:  ranking[0].f,
+        };
+        const a = ranking[1].f.toUpperCase();
+        const b = ranking[2].f.toUpperCase();
+        const t = ranking[0].f.toUpperCase();
+        this.events.push({
+          text: `🤝 ${a} & ${b} form ALLIANCE vs ${t}!`,
+          faction: 'blue', ttl: 4,
+        });
+      }
+    }
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────

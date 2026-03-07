@@ -414,7 +414,13 @@ export class Player {
         this.target = crystal;
         this.state  = 'carry';
       } else if (Math.random() < this.aggro * 0.08) {
-        const enemies = Object.values(world.bases).filter(b => b.faction && b.faction !== this.faction);
+        const alliance = world.alliance;
+        const enemies = Object.values(world.bases).filter(b => {
+          if (!b.faction || b.faction === this.faction) return false;
+          if (alliance && alliance.members.includes(this.faction) &&
+              alliance.members.includes(b.faction)) return false;
+          return true;
+        });
         if (enemies.length) {
           this.target = enemies[Math.floor(Math.random() * enemies.length)];
           this.state  = 'attack';
@@ -434,9 +440,16 @@ export class Player {
   // Fighter: enemy elimination specialist — biased toward leading team (hate control)
   _aiFighter(world, base, leadFaction) {
     if (this.state === 'roam' || !this.target) {
-      // Hate control: 60% chance to specifically target leading faction if different from own
       let enemy;
-      if (leadFaction && leadFaction !== this.faction && Math.random() < 0.60) {
+      const alliance = world.alliance;
+
+      if (alliance && alliance.members.includes(this.faction)) {
+        // In alliance: 90 % chance to specifically target the alliance target faction
+        if (Math.random() < 0.90) {
+          enemy = world._nearestEnemyOfFaction(this.x, this.y, alliance.target);
+        }
+      } else if (leadFaction && leadFaction !== this.faction && Math.random() < 0.60) {
+        // Hate control: 60% chance to specifically target leading faction if different from own
         enemy = world._nearestEnemyOfFaction(this.x, this.y, leadFaction);
       }
       if (!enemy) {
@@ -447,8 +460,14 @@ export class Player {
         this.target = enemy;
         this.state  = 'attack';
       } else if (Math.random() < this.aggro * 0.50) {
-        // Push toward enemy base
-        const enemyBases = Object.values(world.bases).filter(b => b.faction && b.faction !== this.faction);
+        // Push toward enemy base (skip allied bases)
+        const alliance = world.alliance;
+        const enemyBases = Object.values(world.bases).filter(b => {
+          if (!b.faction || b.faction === this.faction) return false;
+          if (alliance && alliance.members.includes(this.faction) &&
+              alliance.members.includes(b.faction)) return false;
+          return true;
+        });
         if (enemyBases.length) {
           this.target = enemyBases[Math.floor(Math.random() * enemyBases.length)];
           this.state  = 'attack';
