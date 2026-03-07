@@ -354,15 +354,19 @@ export class Player {
 
     this.attackTimer -= dt;
 
+    const rallying = this._applyRallyCommand(world);
+
     // ── Hate control: bias toward leading team ──────────────────────────────
     // Fighters prefer to target the leading faction
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    switch (this.role) {
-      case 'collector': this._aiCollector(world, homeBase); break;
-      case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
-      case 'defender':  this._aiDefender(world, homeBase);  break;
+    if (!rallying) {
+      switch (this.role) {
+        case 'collector': this._aiCollector(world, homeBase); break;
+        case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
+        case 'defender':  this._aiDefender(world, homeBase);  break;
+      }
     }
 
     // Pick up jewel when close
@@ -370,12 +374,14 @@ export class Player {
       if (!this.target.delivered && !this.target.carrier && this.carrying.length < MAX_CARRY &&
           dist(this.x, this.y, this.target.x, this.target.y) < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
         this.target.carrier = this;
+        this.target.pickupLockOwner = null;
+        this.target.pickupLockTimer = 0;
         this.carrying.push(this.target);
         // Look for next jewel or deliver if at capacity
         if (this.carrying.length >= MAX_CARRY) {
           this.target = null; this.state = 'roam';
         } else {
-          const next = world._nearestFreeCrystal(this.x, this.y);
+          const next = world._nearestFreeCrystal(this.x, this.y, this);
           if (next && dist(this.x, this.y, next.x, next.y) < 200) {
             this.target = next;
           } else {
@@ -409,7 +415,7 @@ export class Player {
   // Collector: jewel collection specialist (low aggro)
   _aiCollector(world, base) {
     if (this.state === 'roam' || !this.target) {
-      const crystal = world._nearestFreeCrystal(this.x, this.y);
+      const crystal = world._nearestFreeCrystal(this.x, this.y, this);
       if (crystal && Math.random() < 0.90) {
         this.target = crystal;
         this.state  = 'carry';
@@ -435,6 +441,27 @@ export class Player {
         }
       }
     }
+  }
+
+  _applyRallyCommand(world) {
+    const signal = world.rallySignal;
+    if (!signal || signal.faction !== this.faction || this.isPlayerControlled) return false;
+
+    const enemy = world._nearestEnemy(signal.x, signal.y, this.faction);
+    if (enemy && dist(enemy.x, enemy.y, signal.x, signal.y) < signal.radius) {
+      this.target = enemy;
+      this.state = 'attack';
+      return true;
+    }
+
+    const angle = (this.index / 5) * Math.PI * 2;
+    const spread = 22 + this.index * 8;
+    this.target = {
+      x: signal.x + Math.cos(angle) * spread,
+      y: signal.y + Math.sin(angle) * spread,
+    };
+    this.state = 'rally';
+    return true;
   }
 
   // Fighter: enemy elimination specialist — biased toward leading team (hate control)
@@ -503,7 +530,7 @@ export class Player {
       return;
     }
 
-    const crystal = world._nearestFreeCrystal(this.x, this.y);
+    const crystal = world._nearestFreeCrystal(this.x, this.y, this);
     if (crystal && dist(crystal.x, crystal.y, base.x, base.y) < PATROL_RADIUS) {
       this.target = crystal;
       this.state  = 'carry';
@@ -555,6 +582,8 @@ export class Player {
     for (const jewel of this.carrying) {
       jewel.carrier = null;
       jewel.delivered = false;
+      jewel.pickupLockOwner = null;
+      jewel.pickupLockTimer = 0;
       // Scatter slightly around death position
       jewel.x = this.x + randRange(-15, 15);
       jewel.y = this.y + randRange(-15, 15);
@@ -623,6 +652,8 @@ export class MemoryCrystal {
     this.carrier   = null;
     this.delivered = false;
     this.rotAngle  = Math.random() * Math.PI * 2;
+    this.pickupLockOwner = null;
+    this.pickupLockTimer = 0;
     // Jewel value data
     this.tier      = t.tier;
     this.value     = t.value;
@@ -632,6 +663,7 @@ export class MemoryCrystal {
   update(dt) {
     this.pulse    += dt * 3.0;
     this.rotAngle += dt * 1.2;
+    if (this.pickupLockTimer > 0) this.pickupLockTimer = Math.max(0, this.pickupLockTimer - dt);
     if (this.carrier) {
       this.x = this.carrier.x + 12;
       this.y = this.carrier.y - 6;

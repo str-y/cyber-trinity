@@ -91,6 +91,9 @@ export class Renderer {
     // ── Ability projectiles ─────────────────────────────────────────────
     this._drawProjectiles(world.projectiles);
 
+    // ── Targeting and rally indicators ───────────────────────────────────
+    this._drawCommandIndicators(world);
+
     // ── Chaos event effects ────────────────────────────────────────────
     this._drawChaosEvent(world);
 
@@ -585,6 +588,82 @@ export class Renderer {
       }
     }
     ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  _drawCommandIndicators(world) {
+    const ctx = this.ctx;
+    const local = world.localPlayer;
+    const target = world.focusedEnemy;
+
+    if (world.rallySignal) {
+      const signal = world.rallySignal;
+      const pulse = 0.55 + 0.25 * Math.sin(this.time * 8);
+      ctx.save();
+      ctx.strokeStyle = `rgba(74,168,255,${pulse})`;
+      ctx.fillStyle = `rgba(74,168,255,${0.14 + pulse * 0.12})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.arc(signal.x, signal.y, signal.radius * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(180,220,255,0.85)';
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('RALLY', signal.x, signal.y - signal.radius * 0.4 - 10);
+      ctx.restore();
+    }
+
+    if (!local?.alive || !target?.alive) return;
+
+    const dx = target.x - local.x;
+    const dy = target.y - local.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = dx / len;
+    const ny = dy / len;
+    const arrowX = local.x + nx * Math.min(54, len * 0.45);
+    const arrowY = local.y + ny * Math.min(54, len * 0.45);
+    const targetColor = FACTIONS[target.faction].color;
+    const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
+
+    ctx.save();
+    ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 10]);
+    ctx.beginPath();
+    ctx.moveTo(local.x, local.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.translate(arrowX, arrowY);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.fillStyle = withAlpha(targetColor, 0.9);
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = targetColor;
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.lineTo(-6, -8);
+    ctx.lineTo(-2, 0);
+    ctx.lineTo(-6, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 16;
+    ctx.shadowColor = targetColor;
+    ctx.beginPath();
+    ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = withAlpha(targetColor, 0.95);
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
     ctx.restore();
   }
 
