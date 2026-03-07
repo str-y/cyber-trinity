@@ -444,7 +444,7 @@ export class Player {
       const alliance = world.alliance;
 
       if (alliance && alliance.members.includes(this.faction)) {
-        // In alliance: 90 % chance to specifically target the alliance target faction
+        // In alliance: 90% chance to specifically target the alliance target faction
         if (Math.random() < 0.90) {
           enemy = world._nearestEnemyOfFaction(this.x, this.y, alliance.target);
         }
@@ -461,7 +461,6 @@ export class Player {
         this.state  = 'attack';
       } else if (Math.random() < this.aggro * 0.50) {
         // Push toward enemy base (skip allied bases)
-        const alliance = world.alliance;
         const enemyBases = Object.values(world.bases).filter(b => {
           if (!b.faction || b.faction === this.faction) return false;
           if (alliance && alliance.members.includes(this.faction) &&
