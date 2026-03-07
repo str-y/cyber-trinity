@@ -371,6 +371,7 @@ export class Player {
           dist(this.x, this.y, this.target.x, this.target.y) < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
         this.target.carrier = this;
         this.carrying.push(this.target);
+        world.audio?.playCrystalPickup(this.target.tier);
         // Look for next jewel or deliver if at capacity
         if (this.carrying.length >= MAX_CARRY) {
           this.target = null; this.state = 'roam';

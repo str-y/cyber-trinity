@@ -11,6 +11,7 @@ import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS,
          CAPTURE_RANGE, MAX_CARRY } from './entities.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
+import { AudioEngine } from './audio.js';
 
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 12;
@@ -96,6 +97,7 @@ export class Game {
     this.canvas   = canvas;
     this.renderer = new Renderer(canvas);
     this.hud      = new HUD();
+    this.audio    = new AudioEngine();
     this.running  = false;
     this._lastTs  = 0;
 
@@ -417,6 +419,7 @@ export class Game {
           const proj = player.tryAbility(this);
           if (proj) {
             this.projectiles.push(proj);
+            this.audio.playAbility(player.faction, player.job);
             this.events.push({
               text: `${player.faction.toUpperCase()} fired ${player.abilityName.toUpperCase()}`,
               faction: player.faction,
@@ -432,6 +435,7 @@ export class Game {
         const proj = player.tryAbility(this);
         if (proj) {
           this.projectiles.push(proj);
+          this.audio.playAbility(player.faction, player.job);
           this.events.push({
             text: `${player.faction.toUpperCase()} fired ${player.abilityName.toUpperCase()}`,
             faction: player.faction,
@@ -582,6 +586,7 @@ export class Game {
         if (d < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
           nearest.carrier = player;
           player.carrying.push(nearest);
+          this.audio.playCrystalPickup(nearest.tier);
         }
       }
     }
@@ -721,6 +726,7 @@ export class Game {
 
     this.chaosEvent = event;
     this._crystalRainAccum = 0;
+    this.audio.playChaosEvent(spec.type);
 
     this.events.push({
       text: `${spec.emoji} ${spec.name}: ${spec.description}`,
@@ -742,6 +748,7 @@ export class Game {
     // Death penalty: drop ALL carried jewels
     victim.dropAllJewels(this);
 
+    this.audio.playElimination();
     this.stats[killerFaction].kills++;
     this.stats[victim.faction].deaths++;
     this.scores[killerFaction] += KILL_SCORE;
@@ -779,6 +786,7 @@ export class Game {
         .sort((a, b) => b.score - a.score);
       this.winnerFaction = ranking[0].faction;
       this.victoryTimer = 5;
+      this.audio.playMatchEnd(this.winnerFaction);
       this.events.push({
         text: `⏰ TIME UP! ${this.winnerFaction.toUpperCase()} wins the match`,
         faction: this.winnerFaction,
