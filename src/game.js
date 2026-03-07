@@ -137,8 +137,22 @@ export class Game {
     // Active faction buffs: { blue: { speedMult, regenMult, … , timer }, … }
     this.factionBuffs = {};
     this.localPlayer = null;
-    this.input = { up: false, down: false, left: false, right: false, ability: false };
+    this.input = {
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+      ability: false,
+      target: false,
+      drop: false,
+      rally: false,
+    };
     this._abilityLatch = false;
+    this._targetLatch = false;
+    this._dropLatch = false;
+    this._rallyLatch = false;
+    this.focusedEnemy = null;
+    this.rallySignal = null;
     this._bindInput();
 
     // ── Alliance (temporary 2-vs-1 pact) ─────────────────────────────────
@@ -232,9 +246,24 @@ export class Game {
       if (code === 'KeyA' || code === 'ArrowLeft') this.input.left = down;
       if (code === 'KeyD' || code === 'ArrowRight') this.input.right = down;
       if (code === 'Space') this.input.ability = down;
+      if (code === 'Tab') this.input.target = down;
+      if (code === 'KeyE') this.input.drop = down;
+      if (code === 'KeyQ') this.input.rally = down;
+      return (
+        code === 'KeyW' || code === 'ArrowUp' ||
+        code === 'KeyS' || code === 'ArrowDown' ||
+        code === 'KeyA' || code === 'ArrowLeft' ||
+        code === 'KeyD' || code === 'ArrowRight' ||
+        code === 'Space' || code === 'Tab' ||
+        code === 'KeyE' || code === 'KeyQ'
+      );
     };
-    window.addEventListener('keydown', e => setKey(e.code, true));
-    window.addEventListener('keyup',   e => setKey(e.code, false));
+    window.addEventListener('keydown', e => {
+      if (setKey(e.code, true)) e.preventDefault();
+    });
+    window.addEventListener('keyup', e => {
+      if (setKey(e.code, false)) e.preventDefault();
+    });
   }
 
   _positionBases() {
@@ -383,6 +412,7 @@ export class Game {
 
     // Alliance evaluation (before AI so targeting reflects current pact)
     this._updateAlliance();
+    this._updateCommandState(dt);
 
     // Players
     for (const player of this.players) {
@@ -580,11 +610,13 @@ export class Game {
 
     // Pick up nearby jewels (up to MAX_CARRY)
     if (player.carrying.length < MAX_CARRY) {
-      const nearest = this._nearestFreeCrystal(player.x, player.y);
+      const nearest = this._nearestFreeCrystal(player.x, player.y, player);
       if (nearest) {
         const d = Math.hypot(player.x - nearest.x, player.y - nearest.y);
         if (d < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
           nearest.carrier = player;
+          nearest.pickupLockOwner = null;
+          nearest.pickupLockTimer = 0;
           player.carrying.push(nearest);
           this.audio.playCrystalPickup(nearest.tier);
         }
@@ -815,6 +847,8 @@ export class Game {
     this.factionBuffs = {};
     this._jewelRespawnAccum = 0;
     this.alliance = null;
+    this.focusedEnemy = null;
+    this.rallySignal = null;
 
     // Reset chaos events
     this.chaosEvent = null;
@@ -866,10 +900,11 @@ export class Game {
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
-  _nearestFreeCrystal(x, y) {
+  _nearestFreeCrystal(x, y, seeker = null) {
     let best = null, bestD = Infinity;
     for (const c of this.crystals) {
       if (c.delivered || c.carrier) continue;
+      if (c.pickupLockTimer > 0 && c.pickupLockOwner === seeker) continue;
       const dx = c.x - x, dy = c.y - y;
       const d  = Math.sqrt(dx * dx + dy * dy);
       if (d < bestD) { bestD = d; best = c; }
@@ -976,6 +1011,96 @@ export class Game {
         });
       }
     }
+  }
+
+  _updateCommandState(dt) {
+    if (this.rallySignal) {
+      this.rallySignal.timer = Math.max(0, this.rallySignal.timer - dt);
+      if (this.rallySignal.timer <= 0) this.rallySignal = null;
+    }
+
+    const local = this.localPlayer;
+    if (this.focusedEnemy && (!this.focusedEnemy.alive || !local ||
+        this.focusedEnemy.faction === local.faction ||
+        this._isAlly(local.faction, this.focusedEnemy.faction))) {
+      this.focusedEnemy = null;
+    }
+
+    if (this.input.target && !this._targetLatch) {
+      this._targetLatch = true;
+      this._focusNearestEnemy();
+    } else if (!this.input.target) {
+      this._targetLatch = false;
+    }
+
+    if (this.input.drop && !this._dropLatch) {
+      this._dropLatch = true;
+      this._dropManualCrystal();
+    } else if (!this.input.drop) {
+      this._dropLatch = false;
+    }
+
+    if (this.input.rally && !this._rallyLatch) {
+      this._rallyLatch = true;
+      this._issueRallySignal();
+    } else if (!this.input.rally) {
+      this._rallyLatch = false;
+    }
+  }
+
+  _focusNearestEnemy() {
+    const player = this.localPlayer;
+    if (!player?.alive) return;
+    this.focusedEnemy = this._nearestEnemy(player.x, player.y, player.faction);
+    if (!this.focusedEnemy) return;
+    this.events.push({
+      text: `🎯 Target locked on ${this.focusedEnemy.faction.toUpperCase()}`,
+      faction: player.faction,
+      ttl: 2,
+    });
+  }
+
+  _dropManualCrystal() {
+    const player = this.localPlayer;
+    if (!player?.alive || player.carrying.length === 0) return;
+    const jewel = player.carrying.pop();
+    const speed = Math.hypot(player.vx, player.vy);
+    const dirX = speed > 0 ? player.vx / speed : 0;
+    const dirY = speed > 0 ? player.vy / speed : -1;
+    jewel.carrier = null;
+    jewel.delivered = false;
+    jewel.pickupLockOwner = player;
+    jewel.pickupLockTimer = 0.75;
+    jewel.x = Math.max(CRYSTAL_RADIUS, Math.min(
+      this.width - CRYSTAL_RADIUS,
+      player.x + dirX * 20 + (Math.random() - 0.5) * 6,
+    ));
+    jewel.y = Math.max(CRYSTAL_RADIUS, Math.min(
+      this.height - CRYSTAL_RADIUS,
+      player.y + dirY * 20 + (Math.random() - 0.5) * 6,
+    ));
+    this.events.push({
+      text: `💎 ${player.faction.toUpperCase()} dropped a jewel`,
+      faction: player.faction,
+      ttl: 2,
+    });
+  }
+
+  _issueRallySignal() {
+    const player = this.localPlayer;
+    if (!player?.alive) return;
+    this.rallySignal = {
+      faction: player.faction,
+      x: player.x,
+      y: player.y,
+      radius: 150,
+      timer: 6,
+    };
+    this.events.push({
+      text: `📡 ${player.faction.toUpperCase()} issued a rally signal`,
+      faction: player.faction,
+      ttl: 3,
+    });
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────
