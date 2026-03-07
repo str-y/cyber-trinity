@@ -24,6 +24,7 @@ const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
+const AURA_EMISSION_INTERVAL = 0.14;
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -439,6 +440,15 @@ export class Game {
       if (player.alive && healBuff) {
         player.health = Math.min(player.maxHealth, player.health + healBuff * dt);
       }
+
+      const buff = this.factionBuffs[player.faction];
+      if (player.alive && buff) {
+        player.auraTimer -= dt;
+        if (player.auraTimer <= 0) {
+          this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
+          player.auraTimer = AURA_EMISSION_INTERVAL;
+        }
+      }
     }
 
     // Ability firing (AI triggers periodically)
@@ -596,9 +606,24 @@ export class Game {
           const pts = deliveryBase.deliverJewel(jewel.value);
           totalScore += pts;
           jewel.delivered = true;
+          this.sparks.push(...Particle.burst(deliveryBase.x, deliveryBase.y, jewel.tierColor, 5, {
+            speedMin: 70,
+            speedMax: 220,
+            lifeMin: 0.45,
+            lifeMax: 1.05,
+            sizeMin: 2.2,
+            sizeMax: 4.2,
+            drag: 1.2,
+            gravity: 12,
+          }));
         }
         this.scores[player.faction] += totalScore;
         this.stats[player.faction].crystals += player.carrying.length;
+        this.sparks.push(...Particle.ring(deliveryBase.x, deliveryBase.y, FACTIONS[player.faction].color, BASE_RADIUS * 0.55, {
+          life: 0.85,
+          growth: 150,
+          lineWidth: 4,
+        }));
         this.events.push({
           text: `${player.faction.toUpperCase()} PLAYER delivered ${player.carrying.length} JEWEL${player.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
           faction: player.faction,
@@ -776,6 +801,16 @@ export class Game {
   _recordElimination(victim, killerFaction, reason = 'eliminated') {
     victim.alive = false;
     victim.respawnTimer = 5;
+    this.sparks.push(...Particle.burst(victim.x, victim.y, FACTIONS[victim.faction].color, 18, {
+      speedMin: 35,
+      speedMax: 180,
+      lifeMin: 0.6,
+      lifeMax: 1.35,
+      sizeMin: 1.8,
+      sizeMax: 3.8,
+      drag: 2.1,
+      gravity: -6,
+    }));
 
     // Death penalty: drop ALL carried jewels
     victim.dropAllJewels(this);
