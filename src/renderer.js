@@ -4,7 +4,7 @@
  * Draws bases, network links, players, crystals, particles, rain, and UI overlays.
  */
 
-import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS } from './entities.js';
+import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE } from './entities.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,12 +58,19 @@ export class Renderer {
     // ── Data stream particles ──────────────────────────────────────────────
     this._drawDataStreams(world.dataStreams);
 
-    // ── Bases ──────────────────────────────────────────────────────────────
+    // ── Home bases ─────────────────────────────────────────────────────────
     for (const base of Object.values(world.bases)) {
       this._drawBase(base, world);
     }
 
-    // ── Memory crystals ────────────────────────────────────────────────────
+    // ── TriLock neutral/captured bases ──────────────────────────────────────
+    if (world.trilocks) {
+      for (const tl of world.trilocks) {
+        this._drawTriLock(tl, world);
+      }
+    }
+
+    // ── Jewels (value-tiered) ──────────────────────────────────────────────
     for (const crystal of world.crystals) {
       if (!crystal.delivered) this._drawCrystal(crystal);
     }
@@ -89,6 +96,9 @@ export class Renderer {
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
+
+    // ── Match timer overlay ────────────────────────────────────────────────
+    this._drawMatchTimer(world, W, H);
 
     // ── Victory overlay ────────────────────────────────────────────────────
     if (world.matchEnded) this._drawVictoryOverlay(world);
@@ -321,21 +331,24 @@ export class Renderer {
     this._drawBranch(ctx, ex, ey, angle + spread, len * 0.65, depth - 1);
   }
 
-  // ── Crystal ───────────────────────────────────────────────────────────────
+  // ── Crystal (Jewel — value-tiered) ──────────────────────────────────────
 
   _drawCrystal(crystal) {
     const ctx   = this.ctx;
     const sides = 6;
     const pulse = 0.7 + 0.3 * Math.sin(crystal.pulse);
-    const R     = CRYSTAL_RADIUS * pulse;
+    const R     = (crystal.radius ?? CRYSTAL_RADIUS) * pulse;
+    const tierColor = crystal.tierColor ?? '#a0d4ff';
 
     ctx.save();
     ctx.translate(crystal.x, crystal.y);
     ctx.rotate(crystal.rotAngle);
 
-    // Glow
+    // Glow (tier-coloured)
+    const rgb = hexToRgb(tierColor);
+    const r = rgb?.r ?? 160, g = rgb?.g ?? 212, b = rgb?.b ?? 255;
     const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 3);
-    glow.addColorStop(0, 'rgba(200,230,255,0.35)');
+    glow.addColorStop(0, `rgba(${r},${g},${b},0.40)`);
     glow.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
@@ -344,8 +357,8 @@ export class Renderer {
 
     // Crystal body
     ctx.shadowBlur  = 14;
-    ctx.shadowColor = '#a0d0ff';
-    ctx.fillStyle   = `rgba(180,220,255,0.85)`;
+    ctx.shadowColor = tierColor;
+    ctx.fillStyle   = `rgba(${r},${g},${b},0.85)`;
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth   = 1;
     ctx.beginPath();
@@ -358,6 +371,16 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+
+    // Value label for rare/legendary
+    if (crystal.tier && crystal.tier !== 'normal') {
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 7px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(crystal.value ?? ''), 0, 0);
+    }
 
     ctx.restore();
   }
@@ -468,12 +491,19 @@ export class Renderer {
       ctx.fillText('YOU', 0, -PLAYER_RADIUS - 8);
     }
 
-    const itemByFaction = { blue: 'RIFLE', green: 'SHIELD', red: 'FIST' };
-    const itemLabel = itemByFaction[player.faction] ?? 'ITEM';
+    const jobEmoji = { warrior: '⚔️', mage: '🔮', healer: '💚', scout: '💨' };
+    const itemLabel = jobEmoji[player.job] ?? '⚔️';
     ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(itemLabel, 0, PLAYER_RADIUS + 16);
+
+    // Jewel carry indicator
+    if (player.carrying && player.carrying.length > 0) {
+      ctx.fillStyle = '#ffd700';
+      ctx.font = 'bold 7px "Courier New", monospace';
+      ctx.fillText(`💎×${player.carrying.length}`, 0, -PLAYER_RADIUS - 18);
+    }
 
     ctx.restore();
   }
@@ -775,7 +805,113 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ── Vignette ──────────────────────────────────────────────────────────────
+  // ── TriLock (capturable base) ───────────────────────────────────────────
+
+  _drawTriLock(tl, world) {
+    const ctx = this.ctx;
+    const R = BASE_RADIUS * 0.8;  // slightly smaller than home bases
+    const owned = tl.faction !== null;
+    const f = owned ? FACTIONS[tl.faction] : null;
+    const color = owned ? f.color : '#888888';
+    const { r, g, b } = hexToRgb(color);
+    const shieldsDown = world?.chaosEvent?.type === 'nexus_overload';
+
+    ctx.save();
+
+    // Outer glow
+    const glow = ctx.createRadialGradient(tl.x, tl.y, R * 0.3, tl.x, tl.y, R * 2);
+    glow.addColorStop(0, `rgba(${r},${g},${b},0.12)`);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(tl.x, tl.y, R * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Platform (hexagonal for TriLock)
+    const sides = 6;
+    ctx.fillStyle = `rgba(${r},${g},${b},0.10)`;
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.40)`;
+    ctx.lineWidth = 2;
+    if (!shieldsDown && owned) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = color;
+    }
+    ctx.beginPath();
+    for (let i = 0; i < sides; i++) {
+      const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+      const px = tl.x + Math.cos(angle) * R;
+      const py = tl.y + Math.sin(angle) * R;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Capture progress ring
+    const progress = (tl.captureProgress ?? 0) / 100;
+    if (progress > 0 && progress < 1) {
+      const capColor = tl.captureFaction ? FACTIONS[tl.captureFaction]?.color ?? '#fff' : '#fff';
+      const cr = hexToRgb(capColor);
+      ctx.strokeStyle = `rgba(${cr.r},${cr.g},${cr.b},0.7)`;
+      ctx.lineWidth = 4;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(tl.x, tl.y, R + 6, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Level indicator
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    const trilockLabel = tl.level > 0 ? `TRILOCK Lv${tl.level}` : 'TRILOCK';
+    ctx.fillText(trilockLabel, tl.x, tl.y + R + 18);
+
+    // Faction name (if captured)
+    if (owned) {
+      ctx.font = '8px "Courier New", monospace';
+      ctx.fillStyle = `rgba(${r},${g},${b},0.6)`;
+      ctx.fillText(f.name.toUpperCase(), tl.x, tl.y + R + 30);
+    } else {
+      ctx.font = '8px "Courier New", monospace';
+      ctx.fillStyle = 'rgba(136,136,136,0.5)';
+      ctx.fillText('NEUTRAL', tl.x, tl.y + R + 30);
+    }
+
+    // Jewel stored counter
+    if (tl.crystalsStored > 0) {
+      ctx.fillStyle = color;
+      ctx.font = 'bold 11px "Courier New", monospace';
+      ctx.fillText(`💎 ×${tl.crystalsStored}`, tl.x, tl.y - R - 10);
+    }
+
+    ctx.restore();
+  }
+
+  // ── Match timer (centre top, rendered on canvas for visibility) ────────
+
+  _drawMatchTimer(world, W, H) {
+    const t = Math.max(0, world.matchTimer ?? 0);
+    const mins = Math.floor(t / 60);
+    const secs = Math.floor(t % 60);
+    const text = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    const urgent = t < 30;
+    ctx.fillStyle = urgent ? 'rgba(255,68,68,0.8)' : 'rgba(200,220,255,0.35)';
+    ctx.font = `bold ${urgent ? 18 : 14}px "Courier New", monospace`;
+    if (urgent) {
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#ff4444';
+    }
+    ctx.fillText(text, W / 2, 6);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
 
   _drawVignette(W, H) {
     const ctx  = this.ctx;

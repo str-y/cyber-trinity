@@ -1,7 +1,8 @@
 /**
  * hud.js
  * Manages all DOM-based HUD elements.
- * Scores, health/energy bars, ability cooldowns, event feed, crystal counter.
+ * Scores, match timer, health/energy bars, ability cooldowns, event feed,
+ * jewel counter, TriLock status, hate indicator.
  */
 
 const MAX_FEED_ITEMS = 6;
@@ -44,18 +45,24 @@ export class HUD {
       this._scoreEls[f] = block.querySelector(`#score-${f}`);
     });
 
+    // ── Match timer (injected after score panel) ─────────────────────────
+    const timerEl = document.createElement('div');
+    timerEl.id = 'match-timer';
+    timerEl.innerHTML = `<span id="timer-value">5:00</span>`;
+    scorePanel.parentElement.insertBefore(timerEl, scorePanel.nextSibling);
+
     // ── Faction legend ────────────────────────────────────────────────────
 
     const legend = document.getElementById('faction-legend');
     if (!legend) return;
-    const roles  = ['Data Sniper ×5', 'Bio Guard ×5', 'Core Striker ×5'];
+    const jobSummary = '⚔️War ·🔮Mag ·💚Heal ·💨Scout';
     factions.forEach((f, i) => {
       const row = document.createElement('div');
       row.className = 'legend-row';
       row.innerHTML = `
         <div class="legend-dot ${f}"></div>
         <span class="${f}" style="opacity:0.85">${names[i]}</span>
-        <span style="opacity:0.45;font-size:9px">&nbsp;— ${roles[i]}</span>
+        <span style="opacity:0.45;font-size:9px">&nbsp;— ${jobSummary}</span>
       `;
       legend.appendChild(row);
     });
@@ -64,16 +71,21 @@ export class HUD {
 
     const statusLeft = document.getElementById('status-left');
     statusLeft.innerHTML = `
-      <div class="panel-title blue">AGENT STATUS — DATA SNIPER</div>
-      ${this._barRow('❤️', 'HEALTH', 'health',  '100 / 100', 100, 'health')}
+      <div class="panel-title blue">AGENT STATUS — <span id="job-label">WARRIOR</span></div>
+      ${this._barRow('❤️', 'HEALTH', 'health',  '130 / 130', 100, 'health')}
       ${this._barRow('⚡', 'ENERGY', 'energy',  '100 / 100', 100, 'energy')}
+      <div class="stat-row" style="margin-top:2px">
+        <div class="stat-icon">💎</div>
+        <div class="stat-label">JEWELS</div>
+        <div class="stat-num" id="carry-count" style="width:auto;font-size:11px;color:#ffd700">0 / 5</div>
+      </div>
     `;
 
     // ── Right status (ability / cooldown) ─────────────────────────────────
 
     const statusRight = document.getElementById('status-right');
     statusRight.innerHTML = `
-      <div class="panel-title blue">ABILITY — RAILSHOT</div>
+      <div class="panel-title blue">ABILITY — <span id="ability-label">POWER SLASH</span></div>
       ${this._barRow('🎯', 'CHARGE', 'ability', '100%', 100, 'ability')}
       ${this._barRow('⏱', 'COOLDOWN', 'cooldown', '0.0s', 0, 'cooldown')}
     `;
@@ -83,7 +95,7 @@ export class HUD {
     const counter = document.getElementById('crystal-counter');
     counter.innerHTML = `
       <span class="gem">💎</span>
-      <span style="opacity:0.55;font-size:9px;letter-spacing:2px">CRYSTALS ON FIELD:</span>
+      <span style="opacity:0.55;font-size:9px;letter-spacing:2px">JEWELS ON FIELD:</span>
       <span id="crystal-count" style="color:#a0d4ff;font-weight:bold">—</span>
     `;
 
@@ -140,10 +152,30 @@ export class HUD {
   // ── Per-frame update ─────────────────────────────────────────────────────
 
   update(world) {
-    // Scores
+    // Scores — highlight leading faction
+    const leadFaction = world._leadingFaction?.();
     for (const [f, el] of Object.entries(this._scoreEls)) {
       const s = world.scores[f] ?? 0;
       if (el.textContent !== String(s)) el.textContent = s;
+      // Hate indicator: pulsing glow on leading team score
+      if (f === leadFaction) {
+        el.style.textShadow = '0 0 14px currentColor, 0 0 28px currentColor, 0 0 42px currentColor';
+        el.parentElement.classList.add('leading');
+      } else {
+        el.style.textShadow = '';
+        el.parentElement.classList.remove('leading');
+      }
+    }
+
+    // Match timer
+    const timerVal = document.getElementById('timer-value');
+    if (timerVal) {
+      const t = Math.max(0, world.matchTimer ?? 0);
+      const mins = Math.floor(t / 60);
+      const secs = Math.floor(t % 60);
+      timerVal.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+      // Urgent colour when <30s
+      timerVal.style.color = t < 30 ? '#ff4444' : '#a0d4ff';
     }
 
     // First blue player as "local player"
@@ -160,9 +192,21 @@ export class HUD {
       const chargesPct = 100 - cdPct;
       this._setBar('ability', chargesPct, 100, `${Math.round(chargesPct)}%`);
       this._setBar('cooldown', cdPct, 100, `${local.cooldown.toFixed(1)}s`);
+
+      // Jewel carry count
+      const carryEl = document.getElementById('carry-count');
+      if (carryEl) carryEl.textContent = `${local.carrying.length} / 5`;
+
+      // Job label
+      const jobLabel = document.getElementById('job-label');
+      if (jobLabel) jobLabel.textContent = (local.jobDef?.label ?? 'WARRIOR').toUpperCase();
+
+      // Ability label
+      const abilityLabel = document.getElementById('ability-label');
+      if (abilityLabel) abilityLabel.textContent = (local.abilityName ?? 'SKILL').toUpperCase();
     }
 
-    // Crystal counter
+    // Jewel counter
     const alive = world.crystals.filter(c => !c.delivered && !c.carrier).length;
     const countEl = document.getElementById('crystal-count');
     if (countEl) countEl.textContent = alive;
