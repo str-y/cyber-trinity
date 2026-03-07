@@ -133,6 +133,8 @@ export const CAPTURE_RANGE    = BASE_RADIUS + 20;   // px — how close you must
 export const CAPTURE_SPEED    = 20;   // progress per second per player inside
 export const CAPTURE_MAX      = 100;  // full capture at this value
 export const TRILOCK_MAX_LEVEL = 3;
+const PLAYER_AURA_DESYNC_MAX = 0.16;
+const MIN_PARTICLE_SIZE = 0.2;
 
 // ── TriLock level-up thresholds ──────────────────────────────────────────
 const TRILOCK_LEVEL_2_THRESHOLD = 3;   // deliveries to reach Lv2
@@ -257,7 +259,7 @@ export class Player {
     this.target    = null;           // {x, y} or jewel or base
     this.state     = 'roam';         // 'roam' | 'attack' | 'carry' | 'defend' | 'capture'
     this.attackTimer = 0;
-    this.auraTimer = Math.random() * 0.16;
+    this.auraTimer = Math.random() * PLAYER_AURA_DESYNC_MAX;
 
     // ── Job system (replaces faction-locked abilities) ─────────────────────
     const jobId  = JOB_ASSIGNMENT[index] ?? 'warrior';
@@ -669,7 +671,7 @@ export class Particle {
     this.x    += this.vx * dt;
     this.y    += this.vy * dt;
     this.vy   += this.gravity * dt;
-    this.size = Math.max(0.2, this.size + this.growth * dt);
+    this.size = Math.max(MIN_PARTICLE_SIZE, this.size + this.growth * dt);
     this.life -= dt;
     this.alpha = Math.max(0, this.life / this.maxLife);
   }

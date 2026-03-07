@@ -23,6 +23,7 @@ const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
+const AURA_EMISSION_INTERVAL = 0.14;
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -411,9 +412,9 @@ export class Game {
       const buff = this.factionBuffs[player.faction];
       if (player.alive && buff) {
         player.auraTimer -= dt;
-        while (player.auraTimer <= 0) {
+        if (player.auraTimer <= 0) {
           this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
-          player.auraTimer += 0.14;
+          player.auraTimer = AURA_EMISSION_INTERVAL;
         }
       }
     }
