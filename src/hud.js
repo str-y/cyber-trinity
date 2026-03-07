@@ -119,6 +119,13 @@ export class HUD {
       this._chaosBannerEl = chaosBanner;
     }
 
+    // ── Alliance indicator ────────────────────────────────────────────────
+    const allianceEl = document.getElementById('alliance-indicator');
+    if (allianceEl) {
+      allianceEl.innerHTML = '';
+      this._allianceEl = allianceEl;
+    }
+
     // ── Match-end scoreboard ───────────────────────────────────────────────
     const scoreboard = document.getElementById('match-scoreboard');
     if (scoreboard) {
@@ -214,6 +221,9 @@ export class HUD {
     // Feature contract
     this._updateFeature(world);
 
+    // Alliance indicator
+    this._updateAlliance(world);
+
     // Event feed
     this._updateFeed(world);
     this._updateChaosEvent(world);
@@ -292,6 +302,29 @@ export class HUD {
         ? 'feature-status-completed'
         : 'feature-status-pending';
     }
+  }
+
+  _updateAlliance(world) {
+    if (!this._allianceEl) return;
+    const alliance = world.alliance;
+    if (!alliance) {
+      this._allianceEl.style.display = 'none';
+      return;
+    }
+    this._allianceEl.style.display = 'flex';
+    const [a, b] = alliance.members;
+    const t = alliance.target;
+    this._allianceEl.innerHTML = `
+      <span class="alliance-emoji">🤝</span>
+      <div class="alliance-info">
+        <span class="alliance-title">TEMPORARY ALLIANCE</span>
+        <span class="alliance-desc">
+          <span class="${a}">${a.toUpperCase()}</span> &amp;
+          <span class="${b}">${b.toUpperCase()}</span> vs
+          <span class="${t}">${t.toUpperCase()}</span>
+        </span>
+      </div>
+    `;
   }
 
   _updateChaosEvent(world) {
