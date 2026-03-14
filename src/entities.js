@@ -93,10 +93,14 @@ export const JOBS = {
   warrior: {
     id: 'warrior',
     label: 'Warrior',
+    shortLabel: 'War',
     emoji: '⚔️',
     speed: 72,
     maxHealth: 130,
     aggro: 0.80,
+    role: 'fighter',
+    meleeDamage: 22,
+    energyRegen: 8,
     skills: [
       { name: 'Power Slash', type: 'powerdash', cost: 25, cooldown: 5, damage: 30 },
       { name: 'War Cry',     type: 'warcry',    cost: 30, cooldown: 8, damage: 0 },
@@ -106,10 +110,14 @@ export const JOBS = {
   mage: {
     id: 'mage',
     label: 'Mage',
+    shortLabel: 'Mag',
     emoji: '🔮',
     speed: 55,
     maxHealth: 80,
     aggro: 0.60,
+    role: 'fighter',
+    meleeDamage: 18,
+    energyRegen: 8,
     skills: [
       { name: 'Railshot',  type: 'railshot',  cost: 25, cooldown: 5, damage: 35 },
       { name: 'Ice Wall',  type: 'icewall',   cost: 30, cooldown: 8, damage: 0 },
@@ -119,10 +127,14 @@ export const JOBS = {
   healer: {
     id: 'healer',
     label: 'Healer',
+    shortLabel: 'Heal',
     emoji: '💚',
     speed: 60,
     maxHealth: 100,
     aggro: 0.35,
+    role: 'collector',
+    meleeDamage: 10,
+    energyRegen: 8,
     skills: [
       { name: 'Bio Shield', type: 'bioshield', cost: 30, cooldown: 5, damage: 0 },
       { name: 'Purify',     type: 'purify',    cost: 20, cooldown: 6, damage: 0 },
@@ -132,10 +144,14 @@ export const JOBS = {
   scout: {
     id: 'scout',
     label: 'Scout',
+    shortLabel: 'Scout',
     emoji: '💨',
     speed: 95,
     maxHealth: 85,
     aggro: 0.50,
+    role: 'collector',
+    meleeDamage: 15,
+    energyRegen: 8,
     skills: [
       { name: 'Quick Dash', type: 'powerdash', cost: 20, cooldown: 4, damage: 20 },
       { name: 'Smoke Bomb', type: 'smokebomb', cost: 25, cooldown: 8, damage: 0 },
@@ -145,10 +161,15 @@ export const JOBS = {
   hacker: {
     id: 'hacker',
     label: 'Hacker',
+    shortLabel: 'Hack',
     emoji: '💻',
     speed: 66,
     maxHealth: 76,
     aggro: 0.55,
+    role: 'controller',
+    meleeDamage: 12,
+    energyRegen: 12,
+    hackRegenMult: 2,
     skills: [
       { name: 'Exploit', type: 'exploit', cost: 24, cooldown: 5, damage: 0 },
       { name: 'Data Spike', type: 'dataspike', cost: 30, cooldown: 9, damage: 0 },
@@ -434,10 +455,7 @@ export class Player {
 
     if (refillEnergy) this.energy = 100;
 
-    if (nextJobId === 'hacker') this.role = 'controller';
-    else if (nextJobId === 'scout' || nextJobId === 'healer') this.role = 'collector';
-    else if (this.index === 4) this.role = 'defender';
-    else this.role = 'fighter';
+    this.role = jobDef.role ?? (this.index === 4 ? 'defender' : 'fighter');
   }
 
   // ── Role-based behaviour AI ─────────────────────────────────────────────────
@@ -520,7 +538,7 @@ export class Player {
       const enemy = world._nearestEnemy(this.x, this.y, this.faction);
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
         this.attackTimer = 0.6;
-        const baseDmg = this.job === 'warrior' ? 22 : this.job === 'mage' ? 18 : this.job === 'scout' ? 15 : this.job === 'hacker' ? 12 : 10;
+        const baseDmg = this.jobDef?.meleeDamage ?? 10;
         const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
         const dmg = baseDmg * dmgMult;
         world._registerDamage(enemy, this.faction);
@@ -865,9 +883,6 @@ export class Player {
   _trySkill(world, slot) {
     const { skill, cooldownKey, cooldownMax, cost } = this._getSkillSpec(slot);
     if (!skill || !this.alive || this.abilitySealTimer > 0 || this[cooldownKey] > 0 || this.energy < cost) return null;
-
-    if (skill.type === 'dataspike' && this.job !== 'hacker') return null;
-    if (skill.type === 'systembreach' && this.job !== 'hacker') return null;
 
     const target = this._resolveSkillTarget(world, skill);
     if (!target) return null;

@@ -84,7 +84,7 @@ Each team fields 5 agents across 5 jobs (index 0–4: Warrior, Mage, Healer, Sco
 | **Mage** | 🔮 | 55 | 80 | Railshot (35 dmg), Ice Wall (zone) | Meteor Strike (50 dmg) |
 | **Healer** | 💚 | 60 | 100 | Bio Shield (heal aura), Purify (cleanse) | Sanctuary (mass heal) |
 | **Scout** | 💨 | 95 | 85 | Quick Dash (20 dmg), Smoke Bomb (stealth) | Shadow Step (30 dmg) |
-| **Hacker** | 💻 | 66 | 76 | Exploit (seal 3s), Data Spike (pause capture) | System Breach (disable scoring 10s) |
+| **Hacker** | 💻 | 66 | 76 | Exploit (seal 3s), Data Spike (pause capture), fast energy regen (x2 while hacking) | System Breach (disable scoring 10s) |
 
 ---
 

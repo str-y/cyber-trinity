@@ -1126,8 +1126,8 @@ export class Game {
         }
         if (!regenBlocked) {
           const regenMult = this.factionBuffs[player.faction]?.regenMult ?? 1;
-          const baseRegen = player.job === 'hacker' ? 12 : 8;
-          const hackMult = player.hackLinkTimer > 0 ? 2 : 1;
+          const baseRegen = player.jobDef?.energyRegen ?? 8;
+          const hackMult = player.hackLinkTimer > 0 ? (player.jobDef?.hackRegenMult ?? 1) : 1;
           player.energy = Math.min(100, player.energy + baseRegen * regenMult * hackMult * dt);
         }
       }

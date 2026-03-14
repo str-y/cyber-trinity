@@ -4,7 +4,7 @@
  * Draws bases, network links, players, crystals, particles, rain, and UI overlays.
  */
 
-import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+import { FACTIONS, JOBS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -318,7 +318,8 @@ export class Renderer {
 
     if (scoreDisabled) {
       const codePulse = 0.45 + 0.35 * Math.sin(this.time * 8 + base.shieldPulse);
-      ctx.strokeStyle = `rgba(125,242,255,${0.45 + codePulse * 0.35})`;
+      const codeAlpha = Math.min(1, 0.45 + codePulse * 0.35);
+      ctx.strokeStyle = `rgba(125,242,255,${codeAlpha})`;
       ctx.lineWidth = 4;
       ctx.shadowBlur = 18;
       ctx.shadowColor = '#7df2ff';
@@ -608,8 +609,7 @@ export class Renderer {
       ctx.fillText('YOU', 0, -PLAYER_RADIUS - 8);
     }
 
-    const jobEmoji = { warrior: '⚔️', mage: '🔮', healer: '💚', scout: '💨', hacker: '💻' };
-    const itemLabel = jobEmoji[player.job] ?? '⚔️';
+    const itemLabel = JOBS[player.job]?.emoji ?? '⚔️';
     ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
@@ -1210,7 +1210,8 @@ export class Renderer {
 
     if (capturePaused || scoreDisabled) {
       const codePulse = 0.45 + 0.35 * Math.sin(this.time * 8 + tl.shieldPulse);
-      ctx.strokeStyle = `rgba(125,242,255,${0.35 + codePulse * 0.3})`;
+      const codeAlpha = Math.min(1, 0.35 + codePulse * 0.3);
+      ctx.strokeStyle = `rgba(125,242,255,${codeAlpha})`;
       ctx.lineWidth = 3;
       ctx.shadowBlur = 14;
       ctx.shadowColor = '#7df2ff';
