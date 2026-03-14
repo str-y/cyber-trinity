@@ -874,6 +874,16 @@ html, body {
   box-shadow: 0 0 10px rgba(74, 168, 255, 0.18);
 }
 
+.opt-btn:disabled {
+  cursor: default;
+  opacity: 0.38;
+  box-shadow: none;
+}
+
+.opt-btn.selected:disabled {
+  opacity: 1;
+}
+
 /* smaller variants for AI difficulty */
 .setting-options.mini .opt-btn {
   padding: 4px 7px;

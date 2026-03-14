@@ -275,7 +275,7 @@ export class Base {
 // ── Player ────────────────────────────────────────────────────────────────────
 
 export class Player {
-  constructor(faction, index, x, y) {
+  constructor(faction, index, x, y, options = {}) {
     this.faction   = faction;
     this.factionDef = FACTIONS[faction];
     this.passive   = this.factionDef.passive;
@@ -296,7 +296,8 @@ export class Player {
     this.auraTimer = Math.random() * PLAYER_AURA_DESYNC_MAX;
 
     // ── Job system (replaces faction-locked abilities) ─────────────────────
-    const jobId  = JOB_ASSIGNMENT[index] ?? 'warrior';
+    const jobAssignment = options.jobAssignment ?? JOB_ASSIGNMENT;
+    const jobId  = jobAssignment[index] ?? 'warrior';
     const jobDef = JOBS[jobId];
     this.job       = jobId;
     this.jobDef    = jobDef;
@@ -509,7 +510,8 @@ export class Player {
       return true;
     }
 
-    const angle = (this.index / 5) * Math.PI * 2;
+    const teamSize = world.modeRules?.playersPerFaction ?? 5;
+    const angle = (this.index / teamSize) * Math.PI * 2;
     const spread = 22 + this.index * 8;
     this.target = {
       x: signal.x + Math.cos(angle) * spread,
@@ -525,7 +527,8 @@ export class Player {
 
     const enemy = world._nearestEnemy(pin.x, pin.y, this.faction);
     const enemyNearPin = enemy && dist(enemy.x, enemy.y, pin.x, pin.y) <= pin.radius;
-    const angle = (this.index / 5) * Math.PI * 2;
+    const teamSize = world.modeRules?.playersPerFaction ?? 5;
+    const angle = (this.index / teamSize) * Math.PI * 2;
     const spread = 16 + this.index * 7;
     const formationPoint = {
       x: pin.x + Math.cos(angle) * spread,

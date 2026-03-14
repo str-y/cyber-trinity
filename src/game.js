@@ -55,6 +55,60 @@ const PIN_TYPES = {
   crystal: { label: 'クリスタル', emoji: '💎', radius: 140 },
 };
 
+const MODE_RULES = {
+  standard: {
+    playersPerFaction: 5,
+    matchDuration: MATCH_DURATION,
+    winScore: 150,
+    trilockCount: TRILOCK_COUNT,
+    baseMarginRatio: 0.32,
+    trilockRingRatio: 0.18,
+    spawnOrbit: 40,
+    spawnOrbitVariance: 20,
+    crystalCountMult: 1,
+    bonusJewelInterval: 20,
+    crystalRainInterval: 1.5,
+    featureTriggerScale: 1,
+    guardianInitialSpawn: NEXUS_GUARDIAN_INITIAL_SPAWN,
+    guardianRespawnTime: NEXUS_GUARDIAN_RESPAWN_TIME,
+    normalInset: 60,
+    rareSpreadRatio: 0.25,
+    legendarySpreadRatio: 0.15,
+    jobAssignment: ['warrior', 'mage', 'healer', 'scout', 'warrior'],
+  },
+  quick: {
+    playersPerFaction: 2,
+    matchDuration: 180,
+    winScore: 80,
+    trilockCount: 3,
+    baseMarginRatio: 0.22,
+    trilockRingRatio: 0.11,
+    spawnOrbit: 28,
+    spawnOrbitVariance: 12,
+    crystalCountMult: 0.6,
+    bonusJewelInterval: 20 / 0.6,
+    crystalRainInterval: 1.5 / 0.6,
+    featureTriggerScale: 80 / 150,
+    guardianInitialSpawn: NEXUS_GUARDIAN_INITIAL_SPAWN * 0.6,
+    guardianRespawnTime: NEXUS_GUARDIAN_RESPAWN_TIME * 0.6,
+    normalInset: 110,
+    rareSpreadRatio: 0.18,
+    legendarySpreadRatio: 0.10,
+    jobAssignment: ['warrior', 'scout'],
+  },
+};
+
+function getModeRules(mode = 'standard') {
+  return MODE_RULES[mode] ?? MODE_RULES.standard;
+}
+
+function createFeatureContracts(modeRules) {
+  return FEATURE_CONTRACTS.map(contract => ({
+    ...contract,
+    triggerScore: Math.max(20, Math.round(contract.triggerScore * modeRules.featureTriggerScale)),
+  }));
+}
+
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
 const ALLIANCE_DISSOLVE_THRESHOLD = 10; // score gap to dissolve alliance (hysteresis)
@@ -143,13 +197,16 @@ export class Game {
     this._lastTs  = 0;
     this.playerFaction = options.playerFaction ?? 'blue';
 
+    const gameMode = options.gameMode === 'quick' ? 'quick' : 'standard';
+    this.modeRules = getModeRules(gameMode);
+
     // ── Lobby config (all settings from the pre-match lobby) ───────────────
     this.config = {
-      matchDuration:      options.matchDuration      ?? MATCH_DURATION,
-      winScore:           options.winScore           ?? 0,
+      matchDuration:      options.matchDuration      ?? this.modeRules.matchDuration,
+      winScore:           options.winScore           ?? this.modeRules.winScore,
       chaosEnabled:       options.chaosEnabled       ?? true,
       chaosInterval:      options.chaosInterval      ?? CHAOS_EVENT_INTERVAL,
-      gameMode:           options.gameMode           ?? 'standard',
+      gameMode,
       startingCrystals:   options.startingCrystals   ?? 'normal',
       aiDifficulty: {
         blue:  options.aiDifficulty?.blue  ?? 'normal',
@@ -184,7 +241,7 @@ export class Game {
     this.elapsed = 0;
     this.matchTimer = this.config.matchDuration;   // countdown (seconds)
     // Feature contract chain — current contract is featureContracts[featureIndex]
-    this.featureContracts = FEATURE_CONTRACTS.map(c => ({
+    this.featureContracts = createFeatureContracts(this.modeRules).map(c => ({
       ...c,
       completed: false,
       visualTimer: 0,
@@ -275,17 +332,18 @@ export class Game {
     this._resetNexusGuardian();
 
     // ── Players (playersPerFaction per faction) ───────────────────────────
-    const playersPerFaction = this.config.gameMode === 'quick' ? 2 : 5;
+    const playersPerFaction = this.modeRules.playersPerFaction;
     for (const faction of ['blue', 'green', 'red']) {
       const base = this.bases[faction];
       const diff = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
       for (let i = 0; i < playersPerFaction; i++) {
         const angle = (i / playersPerFaction) * Math.PI * 2;
-        const r     = 40 + Math.random() * 20;
+        const r     = this.modeRules.spawnOrbit + Math.random() * this.modeRules.spawnOrbitVariance;
         const p = new Player(
           faction, i,
           base.x + Math.cos(angle) * r,
           base.y + Math.sin(angle) * r,
+          { jobAssignment: this.modeRules.jobAssignment },
         );
         // Apply AI difficulty scaling only to non-player-controlled agents.
         // The human player is the first member (i === 0) of their chosen faction.
@@ -357,7 +415,7 @@ export class Game {
   _positionBases() {
     const W = this.width, H = this.height;
     const cx = W / 2, cy = H / 2;
-    const margin = Math.min(W, H) * 0.32;
+    const margin = Math.min(W, H) * this.modeRules.baseMarginRatio;
 
     const positions = {
       blue:  { x: cx,                  y: cy - margin },                         // top centre
@@ -385,9 +443,9 @@ export class Game {
     }
     const W = this.width, H = this.height;
     const cx = W / 2, cy = H / 2;
-    const ringR = Math.min(W, H) * 0.18;
-    for (let i = 0; i < TRILOCK_COUNT; i++) {
-      const angle = (i / TRILOCK_COUNT) * Math.PI * 2 - Math.PI / 2;
+    const ringR = Math.min(W, H) * this.modeRules.trilockRingRatio;
+    for (let i = 0; i < this.modeRules.trilockCount; i++) {
+      const angle = (i / this.modeRules.trilockCount) * Math.PI * 2 - Math.PI / 2;
       const tx = cx + Math.cos(angle) * ringR;
       const ty = cy + Math.sin(angle) * ringR;
       this.trilocks.push(new Base(null, tx, ty, false));
@@ -397,7 +455,7 @@ export class Game {
   _positionTriLocks() {
     const W = this.width, H = this.height;
     const cx = W / 2, cy = H / 2;
-    const ringR = Math.min(W, H) * 0.18;
+    const ringR = Math.min(W, H) * this.modeRules.trilockRingRatio;
     for (let i = 0; i < this.trilocks.length; i++) {
       const angle = (i / this.trilocks.length) * Math.PI * 2 - Math.PI / 2;
       this.trilocks[i].x = cx + Math.cos(angle) * ringR;
@@ -418,7 +476,7 @@ export class Game {
       arenaRadius: NEXUS_GUARDIAN_ARENA_RADIUS,
       aoeRadius: NEXUS_GUARDIAN_AOE_RADIUS,
       state: 'pending',
-      timer: NEXUS_GUARDIAN_INITIAL_SPAWN,
+      timer: this.modeRules.guardianInitialSpawn,
       health: 0,
       maxHealth: NEXUS_GUARDIAN_BASE_HEALTH,
       spawnCount: 0,
@@ -444,7 +502,7 @@ export class Game {
   _spawnInitialJewels() {
     const W = this.width, H = this.height;
     const cx = W / 2, cy = H / 2;
-    const count = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    const count = this._getCrystalTarget();
     for (let i = 0; i < count; i++) {
       this.crystals.push(this._createJewel(cx, cy, W, H));
     }
@@ -464,22 +522,29 @@ export class Game {
     let x, y;
     if (tier.tier === 'legendary') {
       // Centre zone (inner 30%)
-      const spread = Math.min(W, H) * 0.15;
+      const spread = Math.min(W, H) * this.modeRules.legendarySpreadRatio;
       x = cx + (Math.random() - 0.5) * spread * 2;
       y = cy + (Math.random() - 0.5) * spread * 2;
     } else if (tier.tier === 'rare') {
       // Mid zone (inner 50%)
-      const spread = Math.min(W, H) * 0.25;
+      const spread = Math.min(W, H) * this.modeRules.rareSpreadRatio;
       x = cx + (Math.random() - 0.5) * spread * 2;
       y = cy + (Math.random() - 0.5) * spread * 2;
     } else {
-      // Full field
-      x = 60 + Math.random() * (W - 120);
-      y = 60 + Math.random() * (H - 120);
+      // Standard uses the full field; quick mode stays in the central combat area.
+      const inset = Math.min(this.modeRules.normalInset, Math.min(W, H) * 0.28);
+      x = inset + Math.random() * (W - inset * 2);
+      y = inset + Math.random() * (H - inset * 2);
     }
-    x = Math.max(60, Math.min(W - 60, x));
-    y = Math.max(60, Math.min(H - 60, y));
+    const inset = Math.min(this.modeRules.normalInset, Math.min(W, H) * 0.28);
+    x = Math.max(inset, Math.min(W - inset, x));
+    y = Math.max(inset, Math.min(H - inset, y));
     return new MemoryCrystal(x, y, tier);
+  }
+
+  _getCrystalTarget() {
+    const baseCount = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    return Math.max(3, Math.round(baseCount * this.modeRules.crystalCountMult));
   }
 
   _initDataStreams() {
@@ -633,7 +698,7 @@ export class Game {
 
     // Re-spawn delivered jewels (value-tiered, centre-weighted)
     const active = this.crystals.filter(c => !c.delivered);
-    const crystalTarget = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    const crystalTarget = this._getCrystalTarget();
     if (active.length < crystalTarget * 0.5) {
       this.crystals = this.crystals.filter(c => !c.delivered);
       const cx = this.width / 2, cy = this.height / 2;
@@ -645,7 +710,7 @@ export class Game {
 
     // Time-based high-value jewel injection (every 20 s a bonus rare/legendary spawns at centre)
     this._jewelRespawnAccum += dt;
-    if (this._jewelRespawnAccum >= 20) {
+    if (this._jewelRespawnAccum >= this.modeRules.bonusJewelInterval) {
       this._jewelRespawnAccum = 0;
       const cx = this.width / 2, cy = this.height / 2;
       const bonusTier = Math.random() < BONUS_LEGENDARY_CHANCE ? JEWEL_TIERS[2] : JEWEL_TIERS[1];
@@ -920,6 +985,7 @@ export class Game {
     const event = {
       ...spec,
       remaining: spec.duration,
+      spawnInterval: spec.type === 'crystal_rain' ? this.modeRules.crystalRainInterval : spec.spawnInterval,
     };
 
     // EMP Storm: pick a random zone on the map
@@ -1090,7 +1156,7 @@ export class Game {
     this._resetNexusGuardian();
 
     // Reset feature contracts
-    this.featureContracts = FEATURE_CONTRACTS.map(c => ({
+    this.featureContracts = createFeatureContracts(this.modeRules).map(c => ({
       ...c,
       completed: false,
       visualTimer: 0,
@@ -1098,11 +1164,11 @@ export class Game {
     this.featureIndex = 0;
 
     // Reset players
-    const playersPerFaction = this.config.gameMode === 'quick' ? 2 : 5;
+    const playersPerFaction = this.modeRules.playersPerFaction;
     for (const player of this.players) {
       const base = this.bases[player.faction];
       const angle = (player.index / playersPerFaction) * Math.PI * 2;
-      const r = 40 + Math.random() * 20;
+      const r = this.modeRules.spawnOrbit + Math.random() * this.modeRules.spawnOrbitVariance;
       player.x = base.x + Math.cos(angle) * r;
       player.y = base.y + Math.sin(angle) * r;
       player.health = player.baseMaxHealth;
@@ -1558,7 +1624,7 @@ export class Game {
     if (!guardian) return;
     const winnerFaction = this._guardianWinningFaction(guardian);
     guardian.state = 'respawning';
-    guardian.timer = NEXUS_GUARDIAN_RESPAWN_TIME;
+    guardian.timer = this.modeRules.guardianRespawnTime;
     guardian.health = 0;
     guardian.damageByFaction = { blue: 0, green: 0, red: 0 };
     guardian.attackTimer = NEXUS_GUARDIAN_ATTACK_INTERVAL;
