@@ -125,6 +125,77 @@ html, body {
   min-width: 180px;
 }
 
+/* ── Spectator panel ── */
+#spectator-panel {
+  position: absolute;
+  bottom: 18px;
+  left: 18px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 320px;
+  max-width: 360px;
+  background: rgba(0, 10, 30, 0.78);
+  border: 1px solid rgba(100, 180, 255, 0.3);
+  border-radius: 4px;
+  padding: 10px 14px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 18px rgba(74, 168, 255, 0.12);
+}
+
+.spectator-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.spectator-line span,
+.spectator-controls {
+  opacity: 0.58;
+  font-size: 9px;
+  letter-spacing: 2px;
+}
+
+.spectator-line b,
+.spectator-base {
+  font-size: 10px;
+  font-weight: bold;
+  color: #d8ecff;
+}
+
+#spectator-bases {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spectator-base {
+  padding: 3px 6px;
+  border-left: 2px solid rgba(100, 180, 255, 0.28);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0 3px 3px 0;
+}
+
+.spectator-base.blue {
+  border-left-color: #4aa8ff;
+}
+
+.spectator-base.green {
+  border-left-color: #50ff78;
+}
+
+.spectator-base.red {
+  border-left-color: #ff4444;
+}
+
+.spectator-controls {
+  margin-top: 4px;
+  color: #9fcfff;
+}
+
 /* ── Stat rows ── */
 .stat-row {
   display: flex;

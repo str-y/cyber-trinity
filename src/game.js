@@ -138,6 +138,10 @@ export class Game {
     // Active faction buffs: { blue: { speedMult, regenMult, … , timer }, … }
     this.factionBuffs = {};
     this.localPlayer = null;
+    this.spectatorMode = false;
+    this.spectatorCameraMode = 'overhead';
+    this.spectatorTarget = null;
+    this.spectatorCamera = { x: 0, y: 0, zoom: 1 };
     this.input = {
       up: false,
       down: false,
@@ -194,6 +198,7 @@ export class Game {
       this._positionBases();
       if (this.trilocks.length > 0) this._positionTriLocks();
     }
+    this._updateSpectatorState(0);
   }
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
@@ -225,6 +230,8 @@ export class Game {
     }
     this.localPlayer = this.players.find(p => p.faction === 'blue') ?? null;
     if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
+    this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+    this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
 
     // ── Jewels (value-tiered, centre-weighted) ─────────────────────────
     this._spawnInitialJewels();
@@ -260,7 +267,23 @@ export class Game {
       );
     };
     window.addEventListener('keydown', e => {
-      if (setKey(e.code, true)) e.preventDefault();
+      let handled = setKey(e.code, true);
+      if (!e.repeat) {
+        if (e.code === 'KeyV') {
+          this._toggleSpectatorMode();
+          handled = true;
+        } else if (e.code === 'KeyC') {
+          this._cycleSpectatorCameraMode();
+          handled = true;
+        } else if (e.code === 'BracketLeft') {
+          this._cycleSpectatorTarget(-1);
+          handled = true;
+        } else if (e.code === 'BracketRight') {
+          this._cycleSpectatorTarget(1);
+          handled = true;
+        }
+      }
+      if (handled) e.preventDefault();
     });
     window.addEventListener('keyup', e => {
       if (setKey(e.code, false)) e.preventDefault();
@@ -417,7 +440,7 @@ export class Game {
 
     // Players
     for (const player of this.players) {
-      if (player.isPlayerControlled) this._updateLocalPlayer(player, dt);
+      if (player.isPlayerControlled && !this.spectatorMode) this._updateLocalPlayer(player, dt);
       else player.update(dt, this);
       // Energy regeneration (buffed by faction overclock, blocked by EMP Storm)
       if (player.alive && player.energy < 100) {
@@ -453,7 +476,7 @@ export class Game {
 
     // Ability firing (AI triggers periodically)
     for (const player of this.players) {
-      if (player.isPlayerControlled) {
+      if (player.isPlayerControlled && !this.spectatorMode) {
         if (this.input.ability && !this._abilityLatch) {
           this._abilityLatch = true;
           const proj = player.tryAbility(this);
@@ -559,7 +582,20 @@ export class Game {
         FACTIONS[f].color, 4));
     }
 
+    this._updateSpectatorState(dt);
     this._checkMatchEnd();
+  }
+
+  getObservedPlayer() {
+    return this.spectatorMode
+      ? (this.spectatorTarget ?? this.localPlayer ?? null)
+      : this.localPlayer;
+  }
+
+  getCameraState() {
+    return this.spectatorMode
+      ? { ...this.spectatorCamera, mode: this.spectatorCameraMode, active: true }
+      : { x: this.width / 2, y: this.height / 2, zoom: 1, mode: 'overhead', active: false };
   }
 
   _updateLocalPlayer(player, dt) {
@@ -884,6 +920,8 @@ export class Game {
     this.alliance = null;
     this.focusedEnemy = null;
     this.rallySignal = null;
+    this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+    this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
 
     // Reset chaos events
     this.chaosEvent = null;
@@ -1054,6 +1092,16 @@ export class Game {
       if (this.rallySignal.timer <= 0) this.rallySignal = null;
     }
 
+    if (this.spectatorMode) {
+      this.focusedEnemy = null;
+      this.rallySignal = null;
+      this._abilityLatch = false;
+      this._targetLatch = this.input.target;
+      this._dropLatch = this.input.drop;
+      this._rallyLatch = this.input.rally;
+      return;
+    }
+
     const local = this.localPlayer;
     if (this.focusedEnemy && (!this.focusedEnemy.alive || !local ||
         this.focusedEnemy.faction === local.faction ||
@@ -1136,6 +1184,122 @@ export class Game {
       faction: player.faction,
       ttl: 3,
     });
+  }
+
+  _toggleSpectatorMode() {
+    this.spectatorMode = !this.spectatorMode;
+    this.focusedEnemy = null;
+    this.rallySignal = null;
+    this._abilityLatch = false;
+    if (this.spectatorMode) {
+      this.spectatorCameraMode = 'overhead';
+      this._cycleSpectatorTarget(0);
+      this.events.push({
+        text: '👁️ Spectator mode enabled',
+        faction: 'blue',
+        ttl: 3,
+      });
+      return;
+    }
+    this.spectatorCameraMode = 'overhead';
+    this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+    this.events.push({
+      text: '▶️ Returned to direct control',
+      faction: 'blue',
+      ttl: 3,
+    });
+  }
+
+  _cycleSpectatorCameraMode() {
+    if (!this.spectatorMode) return;
+    const modes = ['overhead', 'follow', 'free'];
+    const index = modes.indexOf(this.spectatorCameraMode);
+    this.spectatorCameraMode = modes[(index + 1) % modes.length];
+    if (this.spectatorCameraMode === 'overhead') {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+    } else if (this.spectatorCameraMode === 'follow' && this.spectatorTarget) {
+      this._focusSpectatorCamera(this.spectatorTarget.x, this.spectatorTarget.y, 1.8);
+    } else if (this.spectatorCameraMode === 'free') {
+      const target = this.spectatorTarget ?? this.localPlayer;
+      if (target) this._focusSpectatorCamera(target.x, target.y, 1.35);
+    }
+    this.events.push({
+      text: `📷 Spectator camera: ${this.spectatorCameraMode.toUpperCase()}`,
+      faction: 'blue',
+      ttl: 2,
+    });
+  }
+
+  _cycleSpectatorTarget(direction = 1) {
+    if (!this.spectatorMode) return;
+    const candidates = this.players.filter(player => player.alive);
+    if (candidates.length === 0) {
+      this.spectatorTarget = null;
+      return;
+    }
+
+    let nextIndex = candidates.indexOf(this.spectatorTarget);
+    if (direction === 0) {
+      nextIndex = Math.max(0, candidates.indexOf(this.localPlayer));
+    } else if (nextIndex === -1) {
+      nextIndex = 0;
+    } else {
+      nextIndex = (nextIndex + direction + candidates.length) % candidates.length;
+    }
+
+    this.spectatorTarget = candidates[nextIndex];
+    if (this.spectatorCameraMode === 'follow') {
+      this._focusSpectatorCamera(this.spectatorTarget.x, this.spectatorTarget.y, 1.8);
+    }
+  }
+
+  _focusSpectatorCamera(x, y, zoom) {
+    const clampedZoom = Math.max(1, zoom);
+    if (clampedZoom <= 1.01) {
+      this.spectatorCamera = {
+        x: this.width / 2,
+        y: this.height / 2,
+        zoom: 1,
+      };
+      return this.spectatorCamera;
+    }
+
+    const halfViewW = this.width / (2 * clampedZoom);
+    const halfViewH = this.height / (2 * clampedZoom);
+    this.spectatorCamera = {
+      x: Math.max(halfViewW, Math.min(this.width - halfViewW, x)),
+      y: Math.max(halfViewH, Math.min(this.height - halfViewH, y)),
+      zoom: clampedZoom,
+    };
+    return this.spectatorCamera;
+  }
+
+  _updateSpectatorState(dt) {
+    if (!this.spectatorMode) return;
+
+    if (this.spectatorTarget && !this.spectatorTarget.alive) {
+      this._cycleSpectatorTarget(1);
+    }
+
+    if (this.spectatorCameraMode === 'overhead') {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+      return;
+    }
+
+    if (this.spectatorCameraMode === 'follow') {
+      const target = this.spectatorTarget ?? this.localPlayer;
+      if (target) this._focusSpectatorCamera(target.x, target.y, 1.8);
+      return;
+    }
+
+    const panX = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+    const panY = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    const speed = 320;
+    this._focusSpectatorCamera(
+      this.spectatorCamera.x + panX * speed * dt,
+      this.spectatorCamera.y + panY * speed * dt,
+      1.35,
+    );
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────

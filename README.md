@@ -224,6 +224,10 @@ Controls (browser preview):
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
+- `V`: toggle spectator mode at any time during the match
+- `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
+- `[` / `]`: switch the followed agent while spectating
+- `W/A/S/D` or Arrow keys in `FREE` spectator camera: pan the camera without affecting the match
 
 ---
 
