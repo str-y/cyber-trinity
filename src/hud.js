@@ -229,8 +229,8 @@ export class HUD {
       const momentumBanner = document.createElement('div');
       momentumBanner.id = 'momentum-banner';
       momentumBanner.innerHTML = `
-        <div class="momentum-count" id="momentum-count">2 HIT COMBO</div>
-        <div class="momentum-detail" id="momentum-detail">x1.5 SCORE • 10S</div>
+        <div class="momentum-count" id="momentum-count">COMBO READY</div>
+        <div class="momentum-detail" id="momentum-detail"></div>
       `;
       hud.appendChild(momentumBanner);
       this._momentumBannerEl = momentumBanner;
@@ -686,8 +686,8 @@ export class HUD {
 
     const comboActive = (local.comboCount ?? 0) > 1 && (local.comboTimer ?? 0) > 0;
     const noticeActive = (local.momentumNoticeTimer ?? 0) > 0;
-    const cooldownReady = !!local.instantCooldownReady;
-    if (!comboActive && !noticeActive && !cooldownReady) {
+    const instantCooldownReady = !!local.instantCooldownReady;
+    if (!comboActive && !noticeActive && !instantCooldownReady) {
       this._momentumBannerEl.classList.remove('active', 'flash');
       this._momentumBannerEl.style.display = 'none';
       return;
@@ -702,20 +702,17 @@ export class HUD {
     this._momentumBannerEl.classList.toggle('flash', (local.comboFlashTimer ?? 0) > 0);
 
     if (comboActive) {
-      countEl.textContent = `${local.comboCount} HIT COMBO`;
+      countEl.textContent = `${local.comboCount} ACTION COMBO`;
       const detailParts = [];
       if (noticeActive && local.momentumNotice) detailParts.push(local.momentumNotice);
-      detailParts.push(`${this._formatMultiplier(local.comboMultiplier ?? 1)} SCORE`);
+      const comboLabel = world._formatComboMultiplier(local.comboMultiplier ?? 1);
+      detailParts.push(`${comboLabel} SCORE`);
       detailParts.push(`${Math.ceil(local.comboTimer ?? 0)}S`);
       detailEl.textContent = detailParts.join(' • ');
     } else {
       countEl.textContent = local.momentumNotice || 'MOMENTUM ONLINE';
-      detailEl.textContent = local.momentumDetail || (cooldownReady ? 'NEXT ABILITY RESET READY' : '');
+      detailEl.textContent = local.momentumDetail || (instantCooldownReady ? 'NEXT ABILITY RESET READY' : '');
     }
-  }
-
-  _formatMultiplier(multiplier) {
-    return `x${Number.isInteger(multiplier) ? multiplier : multiplier.toFixed(1)}`;
   }
 
   _updateChaosEvent(world) {

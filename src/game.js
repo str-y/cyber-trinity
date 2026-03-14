@@ -45,6 +45,7 @@ const COMBO_MULT_STEP = 0.5;
 const COMBO_MAX_MULT = 3;
 const MOMENTUM_NOTICE_DURATION = 2.6;
 const MOMENTUM_FLASH_DURATION = 0.55;
+const MOMENTUM_CONSUMED_NOTICE_DURATION = 1.2;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const ZONE_COLLAPSE_START_TIME = 120;
 const ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC = 0.05;
@@ -2486,7 +2487,7 @@ export class Game {
     if (!player?.instantCooldownReady) return false;
     player.instantCooldownReady = false;
     player.momentumDetail = '';
-    player.momentumNoticeTimer = Math.max(player.momentumNoticeTimer ?? 0, 1.2);
+    player.momentumNoticeTimer = Math.max(player.momentumNoticeTimer ?? 0, MOMENTUM_CONSUMED_NOTICE_DURATION);
     return true;
   }
 
@@ -2579,18 +2580,18 @@ export class Game {
     if (streak === KILLSTREAK_SPEED_THRESHOLD) {
       player.killStreakSpeedTimer = KILLSTREAK_SPEED_DURATION;
       notice = 'DOUBLE KILL';
-      detail = `MOVE +10% • ${KILLSTREAK_SPEED_DURATION}S`;
+      detail = `MOVE +${Math.round((KILLSTREAK_SPEED_MULT - 1) * 100)}% • ${KILLSTREAK_SPEED_DURATION}S`;
     } else if (streak === KILLSTREAK_COOLDOWN_RESET_THRESHOLD) {
       player.instantCooldownReady = true;
       player.cooldown = 0;
       player.cooldown2 = 0;
       player.ultCooldown = 0;
       notice = 'TRIPLE KILL';
-      detail = 'NEXT ABILITY RESET READY';
+      detail = 'COOLDOWNS RESET • NEXT CAST FREE';
     } else if (streak === KILLSTREAK_RAMPAGE_THRESHOLD) {
       player.rampageTimer = KILLSTREAK_RAMPAGE_DURATION;
       notice = 'RAMPAGE';
-      detail = `DAMAGE +25% • ${KILLSTREAK_RAMPAGE_DURATION}S`;
+      detail = `DAMAGE +${Math.round((KILLSTREAK_RAMPAGE_MULT - 1) * 100)}% • ${KILLSTREAK_RAMPAGE_DURATION}S`;
     }
     if (!notice) return;
     this._setMomentumNotice(player, notice, detail);

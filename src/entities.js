@@ -473,8 +473,11 @@ export class Player {
           }
           const delivery = world._recordCrystalDelivery(this, this.carrying.length, totalScore);
           world.scores[this.faction] += delivery.awardedScore;
+          const comboLabel = delivery.combo.active && world._formatComboMultiplier
+            ? ` • ${world._formatComboMultiplier(delivery.combo.multiplier)}`
+            : '';
           world.events.push({
-            text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${delivery.awardedScore}${delivery.combo.active ? ` • ${world._formatComboMultiplier?.(delivery.combo.multiplier) ?? ''}` : ''})`,
+            text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${delivery.awardedScore}${comboLabel})`,
             faction: this.faction,
             ttl: 3,
           });
