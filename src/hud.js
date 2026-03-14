@@ -9,6 +9,7 @@ import { FACTIONS } from './entities.js';
 
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
+const DEFAULT_AGENT_LABEL = 'AGENT';
 
 export class HUD {
   constructor() {
@@ -158,6 +159,24 @@ export class HUD {
       ${this._barRow('⏱', 'COOLDOWN', 'cooldown', '0.0s', 0, 'cooldown')}
     `;
 
+    const spectatorPanel = document.getElementById('spectator-panel');
+    if (spectatorPanel) {
+      spectatorPanel.innerHTML = `
+        <div class="panel-title blue">SPECTATOR MODE</div>
+        <div class="spectator-line"><span>VIEW</span><b id="spectator-mode">OVERHEAD</b></div>
+        <div class="spectator-line"><span>FOLLOW</span><b id="spectator-target">—</b></div>
+        <div class="spectator-line"><span>HP</span><b id="spectator-health">—</b></div>
+        <div class="spectator-line"><span>ENERGY</span><b id="spectator-energy">—</b></div>
+        <div class="spectator-line"><span>ABILITY</span><b id="spectator-cooldown">—</b></div>
+        <div class="spectator-line"><span>JEWELS</span><b id="spectator-carry">—</b></div>
+        <div class="panel-title blue" style="margin-top:8px">BASE UPLINK</div>
+        <div id="spectator-bases"></div>
+        <div class="spectator-controls">V EXIT • C CAMERA • [ / ] TARGET • WASD FREE CAM</div>
+      `;
+      this._spectatorPanelEl = spectatorPanel;
+      this._spectatorBasesEl = spectatorPanel.querySelector('#spectator-bases');
+    }
+
     // ── Crystal counter ───────────────────────────────────────────────────
 
     const counter = document.getElementById('crystal-counter');
@@ -257,9 +276,19 @@ export class HUD {
       timerVal.style.color = t < 30 ? '#ff4444' : '#a0d4ff';
     }
 
+    const statusLeft = document.getElementById('status-left');
+    const statusRight = document.getElementById('status-right');
+    if (world.spectatorMode) {
+      if (statusLeft) statusLeft.style.display = 'none';
+      if (statusRight) statusRight.style.display = 'none';
+    } else {
+      if (statusLeft) statusLeft.style.display = 'flex';
+      if (statusRight) statusRight.style.display = 'flex';
+    }
+
     // First blue player as "local player"
     const local = world.localPlayer;
-    if (local) {
+    if (local && !world.spectatorMode) {
       const statusTitle = document.getElementById('status-title');
       if (statusTitle) statusTitle.className = `panel-title ${local.faction}`;
       const abilityTitle = document.getElementById('ability-title');
@@ -295,6 +324,8 @@ export class HUD {
 
       this._updatePassive(local);
     }
+
+    this._updateSpectator(world);
 
     // Jewel counter
     const alive = world.crystals.filter(c => !c.delivered && !c.carrier).length;
@@ -535,6 +566,58 @@ export class HUD {
       set(`sb-${faction}-crystals`, stats.crystals);
       set(`sb-${faction}-score`, score);
     }
+  }
+
+  _updateSpectator(world) {
+    if (!this._spectatorPanelEl) return;
+    if (!world.spectatorMode) {
+      this._spectatorPanelEl.style.display = 'none';
+      return;
+    }
+
+    this._spectatorPanelEl.style.display = 'flex';
+    const observed = world.getObservedPlayer?.() ?? null;
+    const set = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+
+    set('spectator-mode', (world.spectatorCameraMode ?? 'overhead').toUpperCase());
+    if (observed) {
+      const hpPct = Math.round((observed.health / observed.maxHealth) * 100);
+      const energyPct = Math.round(observed.energy);
+      set(
+        'spectator-target',
+        `${observed.faction.toUpperCase()} · ${(observed.jobDef?.label ?? DEFAULT_AGENT_LABEL).toUpperCase()} #${observed.index + 1}`,
+      );
+      set('spectator-health', `${Math.round(observed.health)} / ${observed.maxHealth} (${hpPct}%)`);
+      set('spectator-energy', `${energyPct} / 100`);
+      set('spectator-cooldown', `${observed.abilityName.toUpperCase()} · ${observed.cooldown.toFixed(1)}s`);
+      set('spectator-carry', `${observed.carrying.length} / 5`);
+    } else {
+      set('spectator-target', `NO LIVE ${DEFAULT_AGENT_LABEL}`);
+      set('spectator-health', '—');
+      set('spectator-energy', '—');
+      set('spectator-cooldown', '—');
+      set('spectator-carry', '—');
+    }
+
+    if (!this._spectatorBasesEl) return;
+    const homeLines = ['blue', 'green', 'red'].map(faction => {
+      const base = world.bases?.[faction];
+      const stored = base?.crystalsStored ?? 0;
+      return `<div class="spectator-base ${faction}">${faction.toUpperCase()} HOME · 💎${stored}</div>`;
+    });
+    const trilockLines = (world.trilocks ?? []).map((base, index) => {
+      const owner = base.faction ? base.faction.toUpperCase() : 'NEUTRAL';
+      const capture = base.captureFaction ? ` · CAP ${base.captureFaction.toUpperCase()} ${Math.round(base.captureProgress)}%` : '';
+      return `
+        <div class="spectator-base ${base.faction ?? ''}">
+          T${index + 1} · ${owner} · Lv${base.level ?? 0} · 💎${base.crystalsStored ?? 0}${capture}
+        </div>
+      `;
+    });
+    this._spectatorBasesEl.innerHTML = [...homeLines, ...trilockLines].join('');
   }
 
   _updateMinimapStatus(world) {

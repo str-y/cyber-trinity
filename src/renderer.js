@@ -21,6 +21,7 @@ function withAlpha(hex, a) {
 }
 
 const RING_PARTICLE_ALPHA = 0.95;
+const CAMERA_ZOOM_THRESHOLD = 1.001;
 
 // ── Renderer class ────────────────────────────────────────────────────────────
 
@@ -41,10 +42,20 @@ export class Renderer {
     this.time += dt;
     const ctx = this.ctx;
     const { width: W, height: H } = world;
+    const camera = world.getCameraState?.() ?? {
+      x: W / 2,
+      y: H / 2,
+      zoom: 1,
+      mode: 'overhead',
+      active: false,
+    };
 
     // ── Background ─────────────────────────────────────────────────────────
     ctx.fillStyle = '#050810';
     ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    this._applyCamera(camera, W, H);
 
     // Subtle grid (industrial floor)
     this._drawGrid(W, H);
@@ -106,6 +117,7 @@ export class Renderer {
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
+    ctx.restore();
 
     // ── Match timer overlay ────────────────────────────────────────────────
     this._drawMatchTimer(world, W, H);
@@ -118,6 +130,14 @@ export class Renderer {
 
     // ── Minimap ────────────────────────────────────────────────────────────
     this._drawMinimap(world, W, H);
+  }
+
+  _applyCamera(camera, W, H) {
+    const zoom = camera?.zoom ?? 1;
+    if (zoom <= CAMERA_ZOOM_THRESHOLD) return;
+    const x = camera?.x ?? W / 2;
+    const y = camera?.y ?? H / 2;
+    this.ctx.setTransform(zoom, 0, 0, zoom, W / 2 - x * zoom, H / 2 - y * zoom);
   }
 
   screenToMinimapWorld(clientX, clientY, world) {
@@ -137,6 +157,7 @@ export class Renderer {
       y: ((y - bounds.y) / bounds.height) * world.height,
     };
   }
+}
 
   // ── Grid ──────────────────────────────────────────────────────────────────
 
@@ -676,54 +697,116 @@ export class Renderer {
       }
     }
 
-    if (!local?.alive || !target?.alive) return;
+    if (local?.alive && target?.alive) {
+      const dx = target.x - local.x;
+      const dy = target.y - local.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dx / len;
+      const ny = dy / len;
+      const arrowX = local.x + nx * Math.min(54, len * 0.45);
+      const arrowY = local.y + ny * Math.min(54, len * 0.45);
+      const targetColor = FACTIONS[target.faction].color;
+      const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
 
-    const dx = target.x - local.x;
-    const dy = target.y - local.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = dx / len;
-    const ny = dy / len;
-    const arrowX = local.x + nx * Math.min(54, len * 0.45);
-    const arrowY = local.y + ny * Math.min(54, len * 0.45);
-    const targetColor = FACTIONS[target.faction].color;
-    const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 10]);
+      ctx.beginPath();
+      ctx.moveTo(local.x, local.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
+      ctx.translate(arrowX, arrowY);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = withAlpha(targetColor, 0.9);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-6, -8);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(targetColor, 0.95);
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+      ctx.restore();
+    }
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 10]);
+      ctx.beginPath();
+      ctx.moveTo(local.x, local.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.translate(arrowX, arrowY);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = withAlpha(targetColor, 0.9);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-6, -8);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(targetColor, 0.95);
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+      ctx.restore();
+    }
+
+    const spectated = world.spectatorTarget;
+    if (!world.spectatorMode || !spectated?.alive) return;
+
+    const f = FACTIONS[spectated.faction];
+    const pulse = 0.45 + 0.3 * Math.sin(this.time * 6);
     ctx.save();
-    ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 10]);
+    ctx.strokeStyle = withAlpha(f.color, 0.45 + pulse * 0.4);
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = f.color;
     ctx.beginPath();
-    ctx.moveTo(local.x, local.y);
-    ctx.lineTo(target.x, target.y);
+    ctx.arc(spectated.x, spectated.y, PLAYER_RADIUS + 13, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.setLineDash([]);
-
-    ctx.translate(arrowX, arrowY);
-    ctx.rotate(Math.atan2(dy, dx));
-    ctx.fillStyle = withAlpha(targetColor, 0.9);
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = targetColor;
-    ctx.beginPath();
-    ctx.moveTo(14, 0);
-    ctx.lineTo(-6, -8);
-    ctx.lineTo(-2, 0);
-    ctx.lineTo(-6, 8);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
-    ctx.lineWidth = 2;
-    ctx.shadowBlur = 16;
-    ctx.shadowColor = targetColor;
-    ctx.beginPath();
-    ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = withAlpha(targetColor, 0.95);
+    ctx.fillStyle = withAlpha(f.color, 0.95);
     ctx.font = 'bold 9px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+    ctx.fillText(
+      world.getCameraState?.().mode === 'follow' ? 'FOLLOW CAM' : 'SPECTATE',
+      spectated.x,
+      spectated.y - PLAYER_RADIUS - 20,
+    );
     ctx.restore();
   }
 
@@ -1336,6 +1419,10 @@ export class Renderer {
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  getSelectedPinType() {
+    return this._selectedPinType;
   }
 
   _pinStyle(type) {

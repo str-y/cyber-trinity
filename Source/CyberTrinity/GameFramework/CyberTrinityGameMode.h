@@ -6,6 +6,9 @@
 #include "Factions/FactionDefinition.h"
 #include "CyberTrinityGameMode.generated.h"
 
+class APlayerController;
+class APawn;
+
 /**
  * Game mode for the 5v5v5 data-node combat match.
  *
@@ -64,6 +67,15 @@ public:
 
     UFactionDefinition* GetFactionDefinition(EFaction Faction) const;
 
+    UFUNCTION(BlueprintCallable, Category = "Spectator")
+    void EnterSpectatorMode(class APlayerController* PlayerController);
+
+    UFUNCTION(BlueprintCallable, Category = "Spectator")
+    void ExitSpectatorMode(class APlayerController* PlayerController);
+
+    UFUNCTION(BlueprintPure, Category = "Spectator")
+    class ACyberTrinitySpectatorPawn* GetSpectatorPawn(class APlayerController* PlayerController) const;
+
 protected:
     virtual void BeginPlay() override;
     virtual void StartPlay() override;
@@ -76,4 +88,10 @@ private:
     void SpawnSingleCrystal();
 
     int32 ActiveCrystalCount = 0;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Spectator", meta = (AllowPrivateAccess = "true"))
+    TSubclassOf<class ACyberTrinitySpectatorPawn> SpectatorPawnClass;
+
+    UPROPERTY(Transient)
+    TMap<TObjectPtr<APlayerController>, TObjectPtr<APawn>> SavedPlayerPawns;
 };

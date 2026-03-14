@@ -25,6 +25,7 @@ const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
+const CAMERA_ZOOM_THRESHOLD = 1.001;
 const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
 const BASE_ALERT_RANGE = BASE_RADIUS + 84;
 const BASE_ALERT_COOLDOWN = 5;
@@ -195,6 +196,10 @@ export class Game {
     this.factionBuffs = {};
     this.guardianBlessings = {};
     this.localPlayer = null;
+    this.spectatorMode = false;
+    this.spectatorCameraMode = 'overhead';
+    this.spectatorTarget = null;
+    this.spectatorCamera = { x: 0, y: 0, zoom: 1 };
     this.input = {
       up: false,
       down: false,
@@ -260,6 +265,7 @@ export class Game {
       if (this.trilocks.length > 0) this._positionTriLocks();
       this._positionNexusGuardian();
     }
+    this._updateSpectatorState(0);
   }
 
   // ── Spawn ─────────────────────────────────────────────────────────────────
@@ -304,6 +310,8 @@ export class Game {
       ?? this.players.find(p => p.faction === 'blue')
       ?? null;
     if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
+    this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+    this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
 
     // ── Jewels (value-tiered, centre-weighted) ─────────────────────────
     this._spawnInitialJewels();
@@ -339,7 +347,23 @@ export class Game {
       );
     };
     window.addEventListener('keydown', e => {
-      if (setKey(e.code, true)) e.preventDefault();
+      let handled = setKey(e.code, true);
+      if (!e.repeat) {
+        if (e.code === 'KeyV') {
+          this._toggleSpectatorMode();
+          handled = true;
+        } else if (e.code === 'KeyC') {
+          this._cycleSpectatorCameraMode();
+          handled = true;
+        } else if (e.code === 'BracketLeft') {
+          this._cycleSpectatorTarget(-1);
+          handled = true;
+        } else if (e.code === 'BracketRight') {
+          this._cycleSpectatorTarget(1);
+          handled = true;
+        }
+      }
+      if (handled) e.preventDefault();
     });
     window.addEventListener('keyup', e => {
       if (setKey(e.code, false)) e.preventDefault();
@@ -539,7 +563,7 @@ export class Game {
 
     // Players
     for (const player of this.players) {
-      if (player.isPlayerControlled) this._updateLocalPlayer(player, dt);
+      if (player.isPlayerControlled && !this.spectatorMode) this._updateLocalPlayer(player, dt);
       else player.update(dt, this);
       this._updatePassiveEffects(player, dt);
       // Energy regeneration (buffed by faction overclock, blocked by EMP Storm)
@@ -586,7 +610,7 @@ export class Game {
 
     // Ability firing (AI triggers periodically)
     for (const player of this.players) {
-      if (player.isPlayerControlled) {
+      if (player.isPlayerControlled && !this.spectatorMode) {
         if (this.input.ability && !this._abilityLatch) {
           this._abilityLatch = true;
           const proj = player.tryAbility(this);
@@ -694,7 +718,20 @@ export class Game {
         FACTIONS[f].color, 4));
     }
 
+    this._updateSpectatorState(dt);
     this._checkMatchEnd();
+  }
+
+  getObservedPlayer() {
+    return this.spectatorMode
+      ? (this.spectatorTarget ?? this.localPlayer ?? null)
+      : this.localPlayer;
+  }
+
+  getCameraState() {
+    return this.spectatorMode
+      ? { ...this.spectatorCamera, mode: this.spectatorCameraMode, active: true }
+      : { x: this.width / 2, y: this.height / 2, zoom: 1, mode: 'overhead', active: false };
   }
 
   _updateLocalPlayer(player, dt) {
@@ -1075,6 +1112,8 @@ export class Game {
     this.alliance = null;
     this.focusedEnemy = null;
     this.rallySignal = null;
+    this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+    this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
     this.minimapPins = [];
     this.recentDeaths = [];
     this.baseAttackAlerts = {
@@ -1359,6 +1398,16 @@ export class Game {
       return pin.timer > 0;
     });
 
+    if (this.spectatorMode) {
+      this.focusedEnemy = null;
+      this.rallySignal = null;
+      this._abilityLatch = false;
+      this._targetLatch = this.input.target;
+      this._dropLatch = this.input.drop;
+      this._rallyLatch = this.input.rally;
+      return;
+    }
+
     const local = this.localPlayer;
     if (this.focusedEnemy && (!this.focusedEnemy.alive || !local ||
         this.focusedEnemy.faction === local.faction ||
@@ -1439,6 +1488,30 @@ export class Game {
     this.events.push({
       text: `📡 ${player.faction.toUpperCase()} issued a rally signal`,
       faction: player.faction,
+      ttl: 3,
+    });
+  }
+
+  _toggleSpectatorMode() {
+    this.spectatorMode = !this.spectatorMode;
+    this.focusedEnemy = null;
+    this.rallySignal = null;
+    this._abilityLatch = false;
+    if (this.spectatorMode) {
+      this.spectatorCameraMode = 'overhead';
+      this._cycleSpectatorTarget(0);
+      this.events.push({
+        text: '👁️ Spectator mode enabled',
+        faction: 'blue',
+        ttl: 3,
+      });
+      return;
+    }
+    this.spectatorCameraMode = 'overhead';
+    this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+    this.events.push({
+      text: '▶️ Returned to direct control',
+      faction: 'blue',
       ttl: 3,
     });
   }
