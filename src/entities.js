@@ -200,6 +200,8 @@ export const CAPTURE_SPEED    = 20;   // progress per second per player inside
 export const CAPTURE_MAX      = 100;  // full capture at this value
 export const TRILOCK_MAX_LEVEL = 3;
 const PLAYER_AURA_DESYNC_MAX = 0.16;
+const PLAYER_AIM_LEAD_MULTIPLIER = 1.5;
+const TARGET_REACH_DISTANCE = 20;
 const MIN_PARTICLE_SIZE = 0.2;
 
 // ── TriLock level-up thresholds ──────────────────────────────────────────
@@ -357,8 +359,28 @@ export class Player {
     this.ultCooldown = 0;
     this.abilitySealTimer = 0;
     this.hackLinkTimer = 0;
+
+    this.stats = createPlayerStats();
+    this.sessionStats = createPlayerStats();
+    this.killStreak = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
+    this.comboMultiplier = 1;
+    this.killStreakSpeedTimer = 0;
+    this.rampageTimer = 0;
+    this.instantCooldownReady = false;
+    this.momentumNotice = '';
+    this.momentumDetail = '';
+    this.momentumNoticeTimer = 0;
+    this.comboFlashTimer = 0;
+    this.lastComboAction = null;
+
     this.aiDisabled = !!options.aiDisabled;
     this.isDummy = !!options.isDummy;
+    this.aiDifficulty = options.aiDifficulty ?? 'normal';
+    this.aiProfile = options.aiProfile ?? null;
+    this.aiDecisionTimer = 0;
+    this.abilityDifficultyMult = 1;
     this.setJob(jobId, { refillEnergy: true, resetCooldowns: true, preserveHealthRatio: false });
   }
 
@@ -462,9 +484,19 @@ export class Player {
 
   _ai(dt, world) {
     const homeBase = world.bases[this.faction];
+    const aiProfile = this.aiProfile ?? {};
 
     // Carrying jewels → deliver to nearest owned TriLock (or home base)
     if (this.carrying.length > 0) {
+      const belowDeliveryThreshold = this.carrying.length < (aiProfile.deliveryThreshold ?? 1);
+      if (belowDeliveryThreshold) {
+        const nextCrystal = world._nearestFreeCrystal(this.x, this.y, this);
+        if (nextCrystal && dist(this.x, this.y, nextCrystal.x, nextCrystal.y) <= (aiProfile.deliverySearchRadius ?? 0)) {
+          this.state = 'carry';
+          this.target = nextCrystal;
+          return;
+        }
+      }
       const deliveryTarget = world._nearestOwnedBase(this.x, this.y, this.faction);
       if (deliveryTarget) {
         this.state  = 'carry';
@@ -477,10 +509,13 @@ export class Player {
             totalScore += world._applyDeliveryPassive(this, deliveryTarget, pts);
             jewel.delivered = true;
           }
-          world.scores[this.faction] += totalScore;
-          world.stats[this.faction].crystals += this.carrying.length;
+          const delivery = world._recordCrystalDelivery(this, this.carrying.length, totalScore);
+          world.scores[this.faction] += delivery.awardedScore;
+          const comboLabel = delivery.combo.active && world._formatComboMultiplier
+            ? ` • ${world._formatComboMultiplier(delivery.combo.multiplier)}`
+            : '';
           world.events.push({
-            text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
+            text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${delivery.awardedScore}${comboLabel})`,
             faction: this.faction,
             ttl: 3,
           });
@@ -491,6 +526,7 @@ export class Player {
     }
 
     this.attackTimer -= dt;
+    this.aiDecisionTimer = Math.max(0, (this.aiDecisionTimer ?? 0) - dt);
 
     const rallying = this._applyRallyCommand(world);
     const pinning = !rallying && this._applyPinCommand(world);
@@ -501,12 +537,22 @@ export class Player {
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    if (!rallying && !pinning && !guardianing) {
+    const targetReached = this.target &&
+      dist(this.x, this.y, this.target.x, this.target.y) < TARGET_REACH_DISTANCE;
+    const shouldRethink = !this.target ||
+      this.aiDecisionTimer <= 0 ||
+      (this.state === 'attack' && (!this.target?.alive || this.target?.faction === this.faction)) ||
+      (this.state === 'carry' && this.target instanceof MemoryCrystal &&
+        (this.target?.delivered || (this.target?.carrier && this.target.carrier !== this))) ||
+      ((this.state === 'roam' || this.state === 'defend' || this.state === 'rally') && targetReached);
+
+    if (!rallying && !pinning && !guardianing && shouldRethink) {
+      this.aiDecisionTimer = aiProfile.reactionTime ?? 0.24;
       switch (this.role) {
-        case 'collector': this._aiCollector(world, homeBase); break;
-        case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
-        case 'controller': this._aiController(world, homeBase, leadFaction); break;
-        case 'defender':  this._aiDefender(world, homeBase);  break;
+        case 'collector': this._aiCollector(world, homeBase, aiProfile); break;
+        case 'fighter':   this._aiFighter(world, homeBase, leadFaction, aiProfile); break;
+        case 'controller': this._aiController(world, homeBase, leadFaction, aiProfile); break;
+        case 'defender':  this._aiDefender(world, homeBase); break;
       }
     }
 
@@ -518,6 +564,7 @@ export class Player {
         this.target.pickupLockOwner = null;
         this.target.pickupLockTimer = 0;
         this.carrying.push(this.target);
+        world._recordCrystalPickup(this);
         world.audio?.playCrystalPickup(this.target.tier);
         // Look for next jewel or deliver if at capacity
         if (this.carrying.length >= MAX_CARRY) {
@@ -539,9 +586,10 @@ export class Player {
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
         this.attackTimer = 0.6;
         const baseDmg = this.jobDef?.meleeDamage ?? 10;
-        const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
+        const dmgMult = (world.factionBuffs?.[this.faction]?.damageMult ?? 1) *
+          (world._getMomentumDamageMultiplier?.(this) ?? 1);
         const dmg = baseDmg * dmgMult;
-        world._registerDamage(enemy, this.faction);
+        world._registerDamage(enemy, this);
         this.markCombat(world.elapsed);
         enemy.markCombat(world.elapsed);
         enemy.health -= dmg;
@@ -557,11 +605,39 @@ export class Player {
     }
   }
 
+  _aiController(world, base, leadFaction, aiProfile = {}) {
+    const hackTarget = world._nearestHackableTriLock?.(this.x, this.y, this.faction);
+    const breachTarget = world._nearestEnemyBaseTarget?.(this.x, this.y, this.faction);
+    const enemy = leadFaction && leadFaction !== this.faction
+      ? world._nearestEnemyOfFaction(this.x, this.y, leadFaction) ?? world._nearestEnemy(this.x, this.y, this.faction)
+      : world._nearestEnemy(this.x, this.y, this.faction);
+
+    if (hackTarget && (hackTarget.capturePausedTimer ?? 0) <= 0) {
+      this.target = hackTarget;
+      this.state = 'capture';
+      return;
+    }
+
+    if (enemy && Math.random() < (aiProfile.targetCommit ?? 0.65)) {
+      this.target = enemy;
+      this.state = 'attack';
+      return;
+    }
+
+    if (breachTarget && Math.random() < 0.5) {
+      this.target = breachTarget;
+      this.state = 'attack';
+      return;
+    }
+
+    this._aiDefender(world, base);
+  }
+
   // Collector: jewel collection specialist (low aggro)
-  _aiCollector(world, base) {
+  _aiCollector(world, base, aiProfile = {}) {
     if (this.state === 'roam' || !this.target) {
       const crystal = world._nearestFreeCrystal(this.x, this.y, this);
-      if (crystal && Math.random() < 0.90) {
+      if (crystal && Math.random() < (aiProfile.crystalFocus ?? 0.90)) {
         this.target = crystal;
         this.state  = 'carry';
       } else if (Math.random() < this.aggro * 0.08) {
@@ -680,17 +756,26 @@ export class Player {
   }
 
   // Fighter: enemy elimination specialist — biased toward leading team (hate control)
-  _aiFighter(world, base, leadFaction) {
+  _aiFighter(world, base, leadFaction, aiProfile = {}) {
     if (this.state === 'roam' || !this.target) {
       let enemy;
       const alliance = world.alliance;
+      const localPlayer = world.localPlayer;
+      const canInterceptPlayer = aiProfile.interceptPlayer &&
+        localPlayer?.alive &&
+        localPlayer.faction !== this.faction &&
+        !(alliance && alliance.members.includes(this.faction) && alliance.members.includes(localPlayer.faction));
 
-      if (alliance && alliance.members.includes(this.faction)) {
+      if (canInterceptPlayer &&
+          (localPlayer.carrying.length > 0 ||
+           dist(this.x, this.y, localPlayer.x, localPlayer.y) < (aiProfile.playerInterceptRange ?? 0))) {
+        enemy = localPlayer;
+      } else if (alliance && alliance.members.includes(this.faction)) {
         // In alliance: 90% chance to specifically target the alliance target faction
-        if (Math.random() < 0.90) {
+        if (Math.random() < (aiProfile.allianceFocus ?? 0.90)) {
           enemy = world._nearestEnemyOfFaction(this.x, this.y, alliance.target);
         }
-      } else if (leadFaction && leadFaction !== this.faction && Math.random() < 0.60) {
+      } else if (leadFaction && leadFaction !== this.faction && Math.random() < (aiProfile.hateFocus ?? 0.60)) {
         // Hate control: 60% chance to specifically target leading faction if different from own
         enemy = world._nearestEnemyOfFaction(this.x, this.y, leadFaction);
       }
@@ -698,7 +783,7 @@ export class Player {
         enemy = world._nearestEnemy(this.x, this.y, this.faction);
       }
 
-      if (enemy && Math.random() < 0.85) {
+      if (enemy && Math.random() < (aiProfile.targetCommit ?? 0.85)) {
         this.target = enemy;
         this.state  = 'attack';
       } else if (Math.random() < this.aggro * 0.50) {
@@ -723,35 +808,6 @@ export class Player {
         }
       }
     }
-  }
-
-  // Defender: base patrol (restricted to patrol radius around own base)
-  _aiController(world, base, leadFaction) {
-    const hackTarget = world._nearestHackableTriLock?.(this.x, this.y, this.faction);
-    const breachTarget = world._nearestEnemyBaseTarget?.(this.x, this.y, this.faction);
-    const enemy = leadFaction && leadFaction !== this.faction
-      ? world._nearestEnemyOfFaction(this.x, this.y, leadFaction) ?? world._nearestEnemy(this.x, this.y, this.faction)
-      : world._nearestEnemy(this.x, this.y, this.faction);
-
-    if (hackTarget && (hackTarget.capturePausedTimer ?? 0) <= 0) {
-      this.target = hackTarget;
-      this.state = 'capture';
-      return;
-    }
-
-    if (enemy && Math.random() < 0.65) {
-      this.target = enemy;
-      this.state = 'attack';
-      return;
-    }
-
-    if (breachTarget && Math.random() < 0.5) {
-      this.target = breachTarget;
-      this.state = 'attack';
-      return;
-    }
-
-    this._aiDefender(world, base);
   }
 
   // Defender: base patrol (restricted to patrol radius around own base)
@@ -795,18 +851,26 @@ export class Player {
 
   _move(dt, world) {
     if (!this.target) return;
-    const tx = this.target.x;
-    const ty = this.target.y;
+    let tx = this.target.x;
+    let ty = this.target.y;
+    if (!this.isPlayerControlled && this.state === 'attack' && this.aiProfile?.aimLead &&
+        Number.isFinite(this.target?.vx) && Number.isFinite(this.target?.vy)) {
+      const lead = this.aiProfile.aimLead * (this.target.isPlayerControlled ? PLAYER_AIM_LEAD_MULTIPLIER : 1);
+      tx += this.target.vx * lead;
+      ty += this.target.vy * lead;
+    }
     const dx = tx - this.x, dy = ty - this.y;
     const d  = Math.sqrt(dx * dx + dy * dy);
     if (d < 2) return;
     const speedMult = (world.factionBuffs?.[this.faction]?.speedMult ?? 1) *
       (this.passiveState?.speedMult ?? 1) *
-      (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1);
+      (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1) *
+      (world._getMomentumSpeedMultiplier?.(this) ?? 1);
     const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
-    this.vx = lerp(this.vx, nx * effSpeed, 0.12);
-    this.vy = lerp(this.vy, ny * effSpeed, 0.12);
+    const steering = this.isPlayerControlled ? 0.12 : (this.aiProfile?.steering ?? 0.12);
+    this.vx = lerp(this.vx, nx * effSpeed, steering);
+    this.vy = lerp(this.vy, ny * effSpeed, steering);
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
@@ -884,7 +948,7 @@ export class Player {
     const { skill, cooldownKey, cooldownMax, cost } = this._getSkillSpec(slot);
     if (!skill || !this.alive || this.abilitySealTimer > 0 || this[cooldownKey] > 0 || this.energy < cost) return null;
 
-    const target = this._resolveSkillTarget(world, skill);
+    const target = this._resolveSkillTarget(world, skill, slot);
     if (!target) return null;
 
     this.energy -= cost;
@@ -896,88 +960,123 @@ export class Player {
       : 0;
     const cooldownMult = world._getAbilityCooldownMultiplier?.() ?? 1;
     this[cooldownKey] = Math.max(0, cooldownMax * cooldownMult - cooldownReduction);
+    if (slot === 'primary' && world._consumeInstantCooldownReset?.(this)) this[cooldownKey] = 0;
     if (this.passive?.id === 'overclock' && this.passiveState) {
       this.passiveState.overclockStacks = 0;
     }
     this.markCombat(world.elapsed ?? 0);
+    world._recordAbilityUse(this);
 
     if (skill.type === 'dataspike') this.hackLinkTimer = Math.max(this.hackLinkTimer, 4);
     else if (skill.type === 'systembreach') this.hackLinkTimer = Math.max(this.hackLinkTimer, 10);
 
-    return this._createSkillProjectile(skill, target);
+    return this._createSkillProjectile(skill, target, world);
   }
 
-  _resolveSkillTarget(world, skill) {
+  _resolveSkillTarget(world, skill, slot = 'primary') {
     if (skill.type === 'dataspike') {
-      const base = world._nearestHackableTriLock?.(this.x, this.y, this.faction);
-      return base ? { x: base.x, y: base.y, target: base } : null;
+      const structure = world._nearestHackableTriLock?.(this.x, this.y, this.faction);
+      return structure ? { x: structure.x, y: structure.y, targetStructure: structure } : null;
     }
     if (skill.type === 'systembreach') {
-      const base = world._nearestEnemyBaseTarget?.(this.x, this.y, this.faction);
-      return base ? { x: base.x, y: base.y, target: base } : null;
+      const structure = world._nearestEnemyBaseTarget?.(this.x, this.y, this.faction);
+      return structure ? { x: structure.x, y: structure.y, targetStructure: structure } : null;
     }
+
+    const aiProfile = this.isPlayerControlled ? null : (this.aiProfile ?? {});
     const enemy = world._nearestEnemy(this.x, this.y, this.faction);
-    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
-    return { x: enemy.x, y: enemy.y, target: enemy };
+    const abilityRange = ABILITY_RANGE * (aiProfile?.abilityRangeMult ?? 1);
+    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > abilityRange) return null;
+
+    let aimX = enemy.x;
+    let aimY = enemy.y;
+    if (slot === 'primary' && aiProfile?.aimLead && Number.isFinite(enemy.vx) && Number.isFinite(enemy.vy)) {
+      const lead = aiProfile.aimLead * (enemy.isPlayerControlled ? PLAYER_AIM_LEAD_MULTIPLIER : 1);
+      aimX += enemy.vx * lead;
+      aimY += enemy.vy * lead;
+    }
+    if (slot === 'primary' && aiProfile?.aimJitter) {
+      aimX += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
+      aimY += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
+    }
+    return { x: aimX, y: aimY, targetStructure: enemy };
   }
 
-  _createSkillProjectile(skill, target) {
+  _createSkillProjectile(skill, target, world) {
     const dx = target.x - this.x;
     const dy = target.y - this.y;
     const [nx, ny] = normalise(dx, dy);
+    const damageMult = world._getMomentumDamageMultiplier?.(this) ?? 1;
     let proj;
     switch (skill.type) {
-      case 'railshot': {
-        proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage);
+      case 'railshot':
+        proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage * damageMult);
         break;
-      }
-      case 'bioshield': {
+      case 'bioshield':
         proj = new Projectile(this.x, this.y, 0, 0, this.faction, 'bioshield', 0);
         break;
-      }
-      case 'powerdash': {
-        proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage);
+      case 'powerdash':
+        proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage * damageMult);
         break;
-      }
-      case 'exploit': {
+      case 'exploit':
         proj = new Projectile(this.x, this.y, nx * 360, ny * 360, this.faction, 'exploit', 0, {
           radius: 7,
           life: 1.1,
           effectDuration: 3,
         });
         break;
-      }
-      case 'dataspike': {
+      case 'dataspike':
         proj = new Projectile(target.x, target.y, 0, 0, this.faction, 'dataspike', 0, {
           radius: 18,
           life: 0.7,
           stationary: true,
         });
-        proj.targetBase = target.target;
+        proj.targetStructure = target.targetStructure;
         break;
-      }
-      case 'systembreach': {
+      case 'systembreach':
         proj = new Projectile(target.x, target.y, 0, 0, this.faction, 'systembreach', 0, {
           radius: 22,
           life: 0.9,
           stationary: true,
         });
-        proj.targetBase = target.target;
+        proj.targetStructure = target.targetStructure;
         break;
-      }
-      default: {
-        proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage);
+      default:
+        proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage * damageMult);
         break;
-      }
     }
     proj.owner = this;
     return proj;
+  }
+
+  resetMatchStats() {
+    this.stats = createPlayerStats();
+  }
+
+  recordStat(key, amount = 1) {
+    if (!(key in this.stats) || !(key in this.sessionStats)) return;
+    this.stats[key] += amount;
+    this.sessionStats[key] += amount;
   }
 
   markCombat(timestamp) {
     this.lastCombatTime = timestamp;
     if (this.passiveState) this.passiveState.bioRegenActive = false;
   }
+}
+
+function createPlayerStats() {
+  return {
+    kills: 0,
+    deaths: 0,
+    assists: 0,
+    crystalsCollected: 0,
+    crystalsDelivered: 0,
+    deliveryScore: 0,
+    baseCaptures: 0,
+    chaosActivity: 0,
+    abilitiesUsed: 0,
+  };
 }
 
 // ── MemoryCrystal (Jewel) ─────────────────────────────────────────────────────
@@ -1139,7 +1238,7 @@ export class Projectile {
     this.owner  = null;   // set by caller
     this.stationary = !!options.stationary;
     this.effectDuration = options.effectDuration ?? 0;
-    this.targetBase = options.targetBase ?? null;
+    this.targetStructure = options.targetStructure ?? null;
   }
 
   update(dt) {

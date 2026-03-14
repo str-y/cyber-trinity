@@ -13,6 +13,16 @@ import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
 import { ReplayManager } from './replay.js';
+import {
+  ARMOR_COLOR_VARIANTS,
+  DEATH_EFFECT_VARIANTS,
+  EFFECT_COLOR_VARIANTS,
+  TRAIL_EFFECT_VARIANTS,
+  fillSelectOptions,
+  loadAgentCustomization,
+  resolveEffectColor,
+  saveAgentCustomization,
+} from './customization.js';
 
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 12;
@@ -23,7 +33,28 @@ const PROJECTILE_HIT_TOLERANCE = 4;    // extra px added to collision radii
 const KILL_SCORE = 5;
 const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
+const KILLSTREAK_SPEED_THRESHOLD = 2;
+const KILLSTREAK_SPEED_MULT = 1.1;
+const KILLSTREAK_SPEED_DURATION = 5;
+const KILLSTREAK_COOLDOWN_RESET_THRESHOLD = 3;
+const KILLSTREAK_RAMPAGE_THRESHOLD = 5;
+const KILLSTREAK_RAMPAGE_MULT = 1.25;
+const KILLSTREAK_RAMPAGE_DURATION = 10;
+const COMBO_WINDOW = 10;
+const COMBO_MULT_STEP = 0.5;
+const COMBO_MAX_MULT = 3;
+const MOMENTUM_NOTICE_DURATION = 2.6;
+const MOMENTUM_FLASH_DURATION = 0.55;
+const MOMENTUM_CONSUMED_NOTICE_DURATION = 1.2;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
+const ZONE_COLLAPSE_START_TIME = 120;
+const ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC = 0.05;
+const ZONE_COLLAPSE_START_RADIUS_RATIO = 0.46;
+const ZONE_COLLAPSE_MIN_RADIUS_RATIO = 0.18;
+const ZONE_COLLAPSE_FX_INTERVAL = 0.22;
+const ZONE_COLLAPSE_MAX_SCORE_GAP = 40;
+const ZONE_COLLAPSE_BASE_EXPONENT = 1.3;
+const ZONE_COLLAPSE_GAP_EXPONENT_REDUCTION = 0.5;
 const QUICK_MODE_SCALE = 0.6;
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
@@ -151,6 +182,20 @@ const MODE_RULES = {
 
 function getModeRules(mode = 'standard') {
   return MODE_RULES[mode] ?? MODE_RULES.standard;
+}
+
+function createFactionStats() {
+  return {
+    kills: 0,
+    deaths: 0,
+    assists: 0,
+    crystalsCollected: 0,
+    crystals: 0,
+    captures: 0,
+    chaosActivity: 0,
+    abilitiesUsed: 0,
+    deliveryScore: 0,
+  };
 }
 
 const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
@@ -285,10 +330,78 @@ const FEATURE_CONTRACTS = [
 
 // ── AI difficulty parameters ───────────────────────────────────────────────
 const AI_DIFFICULTY = {
-  easy:   { speedMult: 0.70, aggroMult: 0.60, abilityMult: 0.40 },
-  normal: { speedMult: 1.00, aggroMult: 1.00, abilityMult: 1.00 },
-  hard:   { speedMult: 1.20, aggroMult: 1.30, abilityMult: 1.60 },
-  expert: { speedMult: 1.40, aggroMult: 1.60, abilityMult: 2.20 },
+  easy: {
+    speedMult: 0.70,
+    aggroMult: 0.60,
+    abilityMult: 0.40,
+    reactionTime: 0.42,
+    steering: 0.08,
+    crystalFocus: 0.70,
+    targetCommit: 0.55,
+    hateFocus: 0.20,
+    allianceFocus: 0.55,
+    deliveryThreshold: 2,
+    deliverySearchRadius: 140,
+    abilityRangeMult: 0.92,
+    aimLead: 0,
+    aimJitter: 18,
+    interceptPlayer: false,
+    playerInterceptRange: 0,
+  },
+  normal: {
+    speedMult: 1.00,
+    aggroMult: 1.00,
+    abilityMult: 1.00,
+    reactionTime: 0.24,
+    steering: 0.12,
+    crystalFocus: 0.90,
+    targetCommit: 0.85,
+    hateFocus: 0.60,
+    allianceFocus: 0.90,
+    deliveryThreshold: 1,
+    deliverySearchRadius: 0,
+    abilityRangeMult: 1,
+    aimLead: 0.08,
+    aimJitter: 8,
+    interceptPlayer: false,
+    playerInterceptRange: 0,
+  },
+  hard: {
+    speedMult: 1.20,
+    aggroMult: 1.30,
+    abilityMult: 1.60,
+    reactionTime: 0.18,
+    steering: 0.15,
+    crystalFocus: 0.98,
+    targetCommit: 0.95,
+    hateFocus: 0.82,
+    allianceFocus: 0.98,
+    deliveryThreshold: 1,
+    deliverySearchRadius: 0,
+    abilityRangeMult: 1.12,
+    aimLead: 0.18,
+    aimJitter: 3,
+    interceptPlayer: false,
+    playerInterceptRange: 0,
+  },
+  expert: {
+    speedMult: 1.40,
+    aggroMult: 1.60,
+    abilityMult: 2.20,
+    reactionTime: 0.12,
+    steering: 0.18,
+    crystalFocus: 1,
+    targetCommit: 1,
+    hateFocus: 1,
+    allianceFocus: 1,
+    deliveryThreshold: 1,
+    deliverySearchRadius: 0,
+    abilityRangeMult: 1.2,
+    aimLead: 0.32,
+    aimJitter: 0,
+    interceptPlayer: true,
+    playerInterceptRange: 260,
+  },
 };
 
 // ── Starting crystal counts ────────────────────────────────────────────────
@@ -310,19 +423,20 @@ export class Game {
     this.modeRules = getModeRules(gameMode);
 
     // ── Lobby config (all settings from the pre-match lobby) ───────────────
-    this.config = {
+    const aiDifficulty = Object.freeze({
+      blue:  options.aiDifficulty?.blue  ?? 'normal',
+      green: options.aiDifficulty?.green ?? 'normal',
+      red:   options.aiDifficulty?.red   ?? 'normal',
+    });
+    this.config = Object.freeze({
       matchDuration:      options.matchDuration      ?? this.modeRules.matchDuration,
       winScore:           options.winScore           ?? this.modeRules.winScore,
       chaosEnabled:       options.chaosEnabled       ?? true,
       chaosInterval:      options.chaosInterval      ?? CHAOS_EVENT_INTERVAL,
       gameMode,
       startingCrystals:   options.startingCrystals   ?? 'normal',
-      aiDifficulty: {
-        blue:  options.aiDifficulty?.blue  ?? 'normal',
-        green: options.aiDifficulty?.green ?? 'normal',
-        red:   options.aiDifficulty?.red   ?? 'normal',
-      },
-    };
+      aiDifficulty,
+    });
     this.damageNumbers = [];
     this.trainingMessage = '';
     this.tutorial = null;
@@ -350,9 +464,9 @@ export class Game {
     this.rain        = [];
     this.scores      = { blue: 0, green: 0, red: 0 };
     this.stats       = {
-      blue: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
-      green: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
-      red: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+      blue: createFactionStats(),
+      green: createFactionStats(),
+      red: createFactionStats(),
     };
     this.events      = [];
     this.projectiles = [];
@@ -362,6 +476,7 @@ export class Game {
     this.victoryTimer = 0;
     this.elapsed = 0;
     this.matchTimer = this.config.matchDuration;   // countdown (seconds)
+    this.zoneCollapse = this._createZoneCollapseState();
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = createFeatureContracts(this.modeRules).map(c => ({
       ...c,
@@ -415,6 +530,7 @@ export class Game {
       crtEnabled: true,
       panelOpen: false,
     };
+    this.agentCustomization = loadAgentCustomization();
     this._bindInput();
     this._initSettingsPanel();
     this._applySettings();
@@ -432,6 +548,7 @@ export class Game {
 
     // ── Jewel respawn timer ─────────────────────────────────────────────────
     this._jewelRespawnAccum = 0;
+    this.sessionMatches = 0;
     this._configureModeState();
   }
 
@@ -472,6 +589,31 @@ export class Game {
     }
   }
 
+  _createZoneCollapseState(previous = {}) {
+    const minDimension = Math.min(this.width || 0, this.height || 0);
+    const startRadius = Math.max(140, minDimension * ZONE_COLLAPSE_START_RADIUS_RATIO);
+    const minRadius = Math.max(90, minDimension * ZONE_COLLAPSE_MIN_RADIUS_RATIO);
+    const progress = Math.max(0, Math.min(1, previous.progress ?? 0));
+    return {
+      active: previous.active ?? false,
+      progress,
+      scoreGap: previous.scoreGap ?? 0,
+      speedMultiplier: previous.speedMultiplier ?? 0.8,
+      centerX: this.width * 0.5,
+      centerY: this.height * 0.5,
+      startRadius,
+      minRadius,
+      currentRadius: startRadius - (startRadius - minRadius) * progress,
+      damagePerSecond: previous.damagePerSecond ?? ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC,
+    };
+  }
+
+  _resetZoneCollapse(preserveProgress = false) {
+    this.zoneCollapse = this._createZoneCollapseState(
+      preserveProgress ? this.zoneCollapse : {},
+    );
+  }
+
   // ── Feature contract accessor (used by HUD and renderer) ─────────────────
   get nextFeature() {
     return this.featureContracts[this.featureIndex] ?? null;
@@ -493,6 +635,7 @@ export class Game {
     this.width  = window.innerWidth;
     this.height = window.innerHeight;
     this.renderer.resize(this.width, this.height);
+    this._resetZoneCollapse(true);
     if (!this.camera.x && !this.camera.y) this.resetReplayCamera();
 
     // Reposition bases on resize
@@ -520,7 +663,7 @@ export class Game {
     const playersPerFaction = this.modeRules.playersPerFaction;
     for (const faction of ['blue', 'green', 'red']) {
       const base = this.bases[faction];
-      const diff = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
+      const aiProfile = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
       for (let i = 0; i < playersPerFaction; i++) {
         const angle = (i / playersPerFaction) * Math.PI * 2;
         const r     = this.modeRules.spawnOrbit + Math.random() * this.modeRules.spawnOrbitVariance;
@@ -534,9 +677,12 @@ export class Game {
         // The human player is the first member (i === 0) of their chosen faction.
         const isHumanPlayer = faction === this.playerFaction && i === 0;
         if (!isHumanPlayer) {
-          p.speed                = Math.round(p.speed * diff.speedMult);
-          p.aggro                = Math.min(1, p.aggro * diff.aggroMult);
-          p.abilityDifficultyMult = diff.abilityMult;  // per-frame ability chance scalar
+          p.aiDifficulty = this.config.aiDifficulty[faction];
+          p.aiProfile = aiProfile;
+          p.aiDecisionTimer = Math.random() * aiProfile.reactionTime;
+          p.speed                = Math.round(p.speed * aiProfile.speedMult);
+          p.aggro                = Math.min(1, p.aggro * aiProfile.aggroMult);
+          p.abilityDifficultyMult = aiProfile.abilityMult;  // per-frame ability chance scalar
         }
         if (this._isSandboxMode() && !isHumanPlayer) {
           p.aiDisabled = true;
@@ -551,7 +697,10 @@ export class Game {
     this.localPlayer = this.players.find(p => p.faction === this.playerFaction)
       ?? this.players.find(p => p.faction === 'blue')
       ?? null;
-    if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
+    if (this.localPlayer) {
+      this.localPlayer.isPlayerControlled = true;
+      this._applyLocalCustomization();
+    }
     this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
     this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
 
@@ -647,9 +796,22 @@ export class Game {
     const quality = document.getElementById('setting-effect-quality');
     const hudToggle = document.getElementById('setting-hud-visible');
     const crtToggle = document.getElementById('setting-crt-enabled');
+    const armorColor = document.getElementById('setting-armor-color');
+    const effectColor = document.getElementById('setting-effect-color');
+    const trailEffect = document.getElementById('setting-trail-effect');
+    const deathEffect = document.getElementById('setting-death-effect');
 
     this._settingsPanel = panel;
-    this._settingsControls = { speed, quality, hudToggle, crtToggle };
+    this._settingsControls = {
+      speed,
+      quality,
+      hudToggle,
+      crtToggle,
+      armorColor,
+      effectColor,
+      trailEffect,
+      deathEffect,
+    };
 
     if (speed) {
       speed.value = String(this.settings.gameSpeed);
@@ -679,6 +841,142 @@ export class Game {
         this.settings.crtEnabled = crtToggle.checked;
         this._applySettings();
       });
+    }
+
+    fillSelectOptions(armorColor, ARMOR_COLOR_VARIANTS);
+    fillSelectOptions(effectColor, EFFECT_COLOR_VARIANTS);
+    fillSelectOptions(trailEffect, TRAIL_EFFECT_VARIANTS);
+    fillSelectOptions(deathEffect, DEATH_EFFECT_VARIANTS);
+
+    if (armorColor) {
+      armorColor.value = this.agentCustomization.armorColor;
+      armorColor.addEventListener('change', () => {
+        this.agentCustomization.armorColor = armorColor.value;
+        this._persistAgentCustomization();
+      });
+    }
+
+    if (effectColor) {
+      effectColor.value = this.agentCustomization.effectColor;
+      effectColor.addEventListener('change', () => {
+        this.agentCustomization.effectColor = effectColor.value;
+        this._persistAgentCustomization();
+      });
+    }
+
+    if (trailEffect) {
+      trailEffect.value = this.agentCustomization.trailEffect;
+      trailEffect.addEventListener('change', () => {
+        this.agentCustomization.trailEffect = trailEffect.value;
+        this._persistAgentCustomization();
+      });
+    }
+
+    if (deathEffect) {
+      deathEffect.value = this.agentCustomization.deathEffect;
+      deathEffect.addEventListener('change', () => {
+        this.agentCustomization.deathEffect = deathEffect.value;
+        this._persistAgentCustomization();
+      });
+    }
+  }
+
+  _persistAgentCustomization() {
+    this.agentCustomization = saveAgentCustomization(this.agentCustomization);
+    this._applyLocalCustomization();
+  }
+
+  _applyLocalCustomization() {
+    if (!this.localPlayer) return;
+    this.localPlayer.appearance = { ...this.agentCustomization };
+  }
+
+  _getPlayerEffectColor(player) {
+    return player?.appearance
+      ? resolveEffectColor(player.appearance.effectColor)
+      : FACTIONS[player?.faction]?.color ?? '#7df2ff';
+  }
+
+  _spawnDeathEffect(player) {
+    const effectColor = this._getPlayerEffectColor(player) ?? FACTIONS[player.faction].color;
+    const deathEffect = player?.appearance?.deathEffect ?? 'burst';
+
+    switch (deathEffect) {
+      case 'nova':
+        return [
+          ...Particle.burst(player.x, player.y, effectColor, 16, {
+            speedMin: 45,
+            speedMax: 180,
+            lifeMin: 0.5,
+            lifeMax: 1.1,
+            sizeMin: 1.8,
+            sizeMax: 3.6,
+            drag: 1.8,
+            gravity: -8,
+          }),
+          ...Particle.ring(player.x, player.y, effectColor, PLAYER_RADIUS * 1.3, {
+            life: 0.9,
+            growth: 150,
+            lineWidth: 4,
+          }),
+        ];
+      case 'shatter':
+        return [
+          ...Particle.burst(player.x, player.y, effectColor, 22, {
+            speedMin: 70,
+            speedMax: 240,
+            lifeMin: 0.45,
+            lifeMax: 1.1,
+            sizeMin: 1.4,
+            sizeMax: 2.8,
+            drag: 1.2,
+            gravity: -14,
+          }),
+          ...Particle.burst(player.x, player.y, FACTIONS[player.faction].color, 10, {
+            speedMin: 35,
+            speedMax: 120,
+            lifeMin: 0.35,
+            lifeMax: 0.75,
+            sizeMin: 1,
+            sizeMax: 2.2,
+            drag: 2.8,
+            gravity: -4,
+          }),
+        ];
+      case 'pulse':
+        return [
+          ...Particle.ring(player.x, player.y, effectColor, PLAYER_RADIUS, {
+            life: 0.55,
+            growth: 175,
+            lineWidth: 3,
+          }),
+          ...Particle.ring(player.x, player.y, effectColor, PLAYER_RADIUS * 0.65, {
+            life: 0.85,
+            growth: 120,
+            lineWidth: 2,
+          }),
+          ...Particle.burst(player.x, player.y, effectColor, 8, {
+            speedMin: 20,
+            speedMax: 90,
+            lifeMin: 0.45,
+            lifeMax: 0.9,
+            sizeMin: 1.8,
+            sizeMax: 3.2,
+            drag: 2.6,
+            gravity: -6,
+          }),
+        ];
+      default:
+        return Particle.burst(player.x, player.y, effectColor, 18, {
+          speedMin: 35,
+          speedMax: 180,
+          lifeMin: 0.6,
+          lifeMax: 1.35,
+          sizeMin: 1.8,
+          sizeMax: 3.8,
+          drag: 2.1,
+          gravity: -6,
+        });
     }
   }
 
@@ -1141,21 +1439,32 @@ export class Game {
         player.health = Math.min(player.maxHealth, player.health + healBuff * dt);
       }
 
+      if (player.alive && this.chaosEvent) {
+        player.recordStat('chaosActivity', dt);
+        this.stats[player.faction].chaosActivity += dt;
+      }
+      this._updateMomentumTimers(player, dt);
+
       const buff = this.factionBuffs[player.faction];
       const guardianBlessing = this.guardianBlessings[player.faction];
       const passiveAura = player.passiveState?.deliveryBonusActive ||
         player.passiveState?.bioRegenActive ||
         player.passiveState?.nearbyAllyBonus ||
         player.passiveState?.overclockStacks > 0 ||
-        player.passiveState?.sprintActive;
+        player.passiveState?.sprintActive ||
+        (player.killStreakSpeedTimer ?? 0) > 0 ||
+        (player.rampageTimer ?? 0) > 0 ||
+        !!player.instantCooldownReady;
       if (player.alive && (buff || guardianBlessing || passiveAura)) {
         player.auraTimer -= dt;
         if (player.auraTimer <= 0) {
-          this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
+          this.sparks.push(...Particle.aura(player.x, player.y, this._getPlayerEffectColor(player), 2));
           player.auraTimer = AURA_EMISSION_INTERVAL;
         }
       }
     }
+
+    this._updateZoneCollapse(dt);
 
     // Ability firing (AI triggers periodically)
     for (const player of this.players) {
@@ -1164,6 +1473,7 @@ export class Game {
           this._abilityLatch = true;
           const proj = player.tryAbility(this);
           if (proj) {
+            proj.effectColor = this._getPlayerEffectColor(player);
             if (this._isTutorialMode()) this._tutorialMetrics.usedJobs[player.job] = true;
             this.projectiles.push(proj);
             this.audio.playAbility(player.faction, player.job);
@@ -1180,6 +1490,7 @@ export class Game {
           this._ability2Latch = true;
           const proj = player.trySecondaryAbility?.(this);
           if (proj) {
+            proj.effectColor = this._getPlayerEffectColor(player);
             this.projectiles.push(proj);
             this.audio.playAbility(player.faction, player.job);
             this.events.push({
@@ -1195,6 +1506,7 @@ export class Game {
           this._ultimateLatch = true;
           const proj = player.tryUltimate?.(this);
           if (proj) {
+            proj.effectColor = this._getPlayerEffectColor(player);
             this.projectiles.push(proj);
             this.audio.playAbility(player.faction, player.job);
             this.events.push({
@@ -1211,6 +1523,7 @@ export class Game {
       if (player.alive && Math.random() < AI_ABILITY_CHANCE * (player.abilityDifficultyMult ?? 1)) {
         const proj = player.tryAbility(this);
         if (proj) {
+          proj.effectColor = this._getPlayerEffectColor(player);
           this.projectiles.push(proj);
           this.audio.playAbility(player.faction, player.job);
           this.events.push({
@@ -1223,6 +1536,7 @@ export class Game {
       if (player.job === 'hacker' && player.alive && Math.random() < AI_ABILITY_CHANCE * 0.65 * (player.abilityDifficultyMult ?? 1)) {
         const proj = player.trySecondaryAbility?.(this);
         if (proj) {
+          proj.effectColor = this._getPlayerEffectColor(player);
           this.projectiles.push(proj);
           this.audio.playAbility(player.faction, player.job);
           this.events.push({
@@ -1235,6 +1549,7 @@ export class Game {
       if (player.job === 'hacker' && player.alive && Math.random() < AI_ABILITY_CHANCE * 0.28 * (player.abilityDifficultyMult ?? 1)) {
         const proj = player.tryUltimate?.(this);
         if (proj) {
+          proj.effectColor = this._getPlayerEffectColor(player);
           this.projectiles.push(proj);
           this.audio.playAbility(player.faction, player.job);
           this.events.push({
@@ -1333,6 +1648,61 @@ export class Game {
     this._updateModeScenario(dt);
     this._checkMatchEnd();
     this.replay.recordFrame();
+  }
+
+  _updateZoneCollapse(dt) {
+    if (!this.zoneCollapse || this._isSandboxMode() || !Number.isFinite(this.matchTimer)) return;
+
+    const zone = this.zoneCollapse;
+    if (!zone.active && this.matchTimer <= ZONE_COLLAPSE_START_TIME) {
+      zone.active = true;
+      this.events.push({
+        text: '⚠️ ZONE COLLAPSE — outer sectors destabilising, move toward the centre',
+        faction: 'red',
+        ttl: 4,
+      });
+    }
+    if (!zone.active) return;
+
+    const standings = Object.values(this.scores).sort((a, b) => b - a);
+    zone.scoreGap = Math.max(0, (standings[0] ?? 0) - (standings[1] ?? 0));
+    const gapRatio = Math.min(1, zone.scoreGap / ZONE_COLLAPSE_MAX_SCORE_GAP);
+    zone.speedMultiplier = 0.8 + gapRatio * 0.7;
+    const elapsedRatio = Math.max(0, Math.min(1,
+      (ZONE_COLLAPSE_START_TIME - Math.max(this.matchTimer, 0)) / ZONE_COLLAPSE_START_TIME,
+    ));
+    const progressExponent = ZONE_COLLAPSE_BASE_EXPONENT - gapRatio * ZONE_COLLAPSE_GAP_EXPONENT_REDUCTION;
+    zone.progress = Math.pow(elapsedRatio, progressExponent);
+    zone.currentRadius = zone.startRadius - (zone.startRadius - zone.minRadius) * zone.progress;
+
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const distance = Math.hypot(player.x - zone.centerX, player.y - zone.centerY);
+      if (distance <= zone.currentRadius) {
+        player.zoneFxTimer = 0;
+        continue;
+      }
+
+      player.markCombat(this.elapsed);
+      player.health -= player.maxHealth * zone.damagePerSecond * dt;
+      player.zoneFxTimer = (player.zoneFxTimer ?? 0) - dt;
+      if (player.zoneFxTimer <= 0) {
+        this.sparks.push(...Particle.burst(player.x, player.y, '#ff6666', 3, {
+          speedMin: 20,
+          speedMax: 90,
+          lifeMin: 0.16,
+          lifeMax: 0.38,
+          sizeMin: 1.4,
+          sizeMax: 2.8,
+          drag: 3.4,
+        }));
+        player.zoneFxTimer = ZONE_COLLAPSE_FX_INTERVAL;
+      }
+
+      if (player.health <= 0) {
+        this._recordElimination(player, null, 'was consumed by', 'ZONE COLLAPSE');
+      }
+    }
   }
 
   _updateModeScenario(dt) {
@@ -1566,7 +1936,8 @@ export class Game {
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
     const speedMult = (this.factionBuffs?.[player.faction]?.speedMult ?? 1) *
       (player.passiveState?.speedMult ?? 1) *
-      this._getGuardianBlessing(player.faction).speedMult;
+      this._getGuardianBlessing(player.faction).speedMult *
+      this._getMomentumSpeedMultiplier(player);
     const effSpeed = player.speed * speedMult;
     const prevX = player.x;
     const prevY = player.y;
@@ -1590,12 +1961,13 @@ export class Game {
     // Deliver jewels to any owned base (home or captured TriLock)
     if (player.carrying.length > 0) {
       const deliveryBase = this._nearestOwnedBase(player.x, player.y, player.faction);
-      if (deliveryBase && Math.hypot(player.x - deliveryBase.x, player.y - deliveryBase.y) < BASE_RADIUS - 5) {
-        let totalScore = 0;
-        for (const jewel of player.carrying) {
-          const pts = deliveryBase.deliverJewel(jewel.value);
-          totalScore += this._applyDeliveryPassive(player, deliveryBase, pts);
-          jewel.delivered = true;
+        if (deliveryBase && Math.hypot(player.x - deliveryBase.x, player.y - deliveryBase.y) < BASE_RADIUS - 5) {
+          let totalScore = 0;
+          const deliveredCount = player.carrying.length;
+          for (const jewel of player.carrying) {
+            const pts = deliveryBase.deliverJewel(jewel.value);
+            totalScore += this._applyDeliveryPassive(player, deliveryBase, pts);
+            jewel.delivered = true;
           this.sparks.push(...Particle.burst(deliveryBase.x, deliveryBase.y, jewel.tierColor, 5, {
             speedMin: 70,
             speedMax: 220,
@@ -1607,8 +1979,8 @@ export class Game {
             gravity: 12,
           }));
         }
-        this.scores[player.faction] += totalScore;
-        this.stats[player.faction].crystals += player.carrying.length;
+        const delivery = this._recordCrystalDelivery(player, deliveredCount, totalScore);
+        this.scores[player.faction] += delivery.awardedScore;
         if (this._isTutorialMode()) this._tutorialMetrics.deliveryDone = true;
         this.sparks.push(...Particle.ring(deliveryBase.x, deliveryBase.y, FACTIONS[player.faction].color, BASE_RADIUS * 0.55, {
           life: 0.85,
@@ -1616,7 +1988,7 @@ export class Game {
           lineWidth: 4,
         }));
         this.events.push({
-          text: `${player.faction.toUpperCase()} PLAYER delivered ${player.carrying.length} JEWEL${player.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
+          text: `${player.faction.toUpperCase()} PLAYER delivered ${player.carrying.length} JEWEL${player.carrying.length > 1 ? 'S' : ''} (+${delivery.awardedScore}${delivery.combo.active ? ` • ${this._formatComboMultiplier(delivery.combo.multiplier)}` : ''})`,
           faction: player.faction,
           ttl: 3,
         });
@@ -1634,6 +2006,7 @@ export class Game {
           nearest.pickupLockOwner = null;
           nearest.pickupLockTimer = 0;
           player.carrying.push(nearest);
+          this._recordCrystalPickup(player);
           this.audio.playCrystalPickup(nearest.tier);
         }
       }
@@ -1658,12 +2031,12 @@ export class Game {
         continue;
       }
 
-      if (proj.type === 'dataspike' && proj.targetBase) {
-        const dx = proj.targetBase.x - proj.x;
-        const dy = proj.targetBase.y - proj.y;
+      if (proj.type === 'dataspike' && proj.targetStructure) {
+        const dx = proj.targetStructure.x - proj.x;
+        const dy = proj.targetStructure.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < BASE_RADIUS * 0.9 + proj.radius) {
-          proj.targetBase.capturePausedTimer = Math.max(proj.targetBase.capturePausedTimer ?? 0, 4);
-          this.sparks.push(...Particle.ring(proj.targetBase.x, proj.targetBase.y, FACTIONS[proj.faction].color, BASE_RADIUS * 0.75, {
+          proj.targetStructure.capturePausedTimer = Math.max(proj.targetStructure.capturePausedTimer ?? 0, 4);
+          this.sparks.push(...Particle.ring(proj.targetStructure.x, proj.targetStructure.y, proj.effectColor ?? FACTIONS[proj.faction].color, BASE_RADIUS * 0.75, {
             life: 0.8,
             growth: 65,
             lineWidth: 3,
@@ -1673,9 +2046,9 @@ export class Game {
         continue;
       }
 
-      if (proj.type === 'systembreach' && proj.targetBase) {
-        proj.targetBase.scoreDisabledTimer = Math.max(proj.targetBase.scoreDisabledTimer ?? 0, 10);
-        this.sparks.push(...Particle.ring(proj.targetBase.x, proj.targetBase.y, FACTIONS[proj.faction].color, BASE_RADIUS * 0.95, {
+      if (proj.type === 'systembreach' && proj.targetStructure) {
+        proj.targetStructure.scoreDisabledTimer = Math.max(proj.targetStructure.scoreDisabledTimer ?? 0, 10);
+        this.sparks.push(...Particle.ring(proj.targetStructure.x, proj.targetStructure.y, proj.effectColor ?? FACTIONS[proj.faction].color, BASE_RADIUS * 0.95, {
           life: 0.95,
           growth: 80,
           lineWidth: 4,
@@ -1692,10 +2065,8 @@ export class Game {
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
           if (proj.type === 'exploit') {
             p.abilitySealTimer = Math.max(p.abilitySealTimer ?? 0, proj.effectDuration || 3);
-            if (proj.owner) {
-              proj.owner.hackLinkTimer = Math.max(proj.owner.hackLinkTimer ?? 0, proj.effectDuration || 3);
-            }
-            this.sparks.push(...Particle.ring(p.x, p.y, FACTIONS[proj.faction].color, p.radius + 10, {
+            if (proj.owner) proj.owner.hackLinkTimer = Math.max(proj.owner.hackLinkTimer ?? 0, proj.effectDuration || 3);
+            this.sparks.push(...Particle.ring(p.x, p.y, proj.effectColor ?? FACTIONS[proj.faction].color, p.radius + 10, {
               life: 0.7,
               growth: 45,
               lineWidth: 2,
@@ -1703,7 +2074,7 @@ export class Game {
             proj.hit = true;
             break;
           }
-          this._registerDamage(p, proj.faction);
+          this._registerDamage(p, proj.owner ?? proj.faction);
           proj.owner?.markCombat(this.elapsed);
           p.markCombat(this.elapsed);
           p.health -= proj.damage;
@@ -1842,6 +2213,34 @@ export class Game {
     });
   }
 
+  _recordCrystalPickup(player) {
+    if (!player) return;
+    player.recordStat('crystalsCollected');
+    this.stats[player.faction].crystalsCollected++;
+  }
+
+  _recordCrystalDelivery(player, deliveredCount, totalScore) {
+    if (!player || deliveredCount <= 0) {
+      return {
+        awardedScore: totalScore,
+        combo: { count: 0, multiplier: 1, active: false },
+      };
+    }
+    const combo = this._registerComboAction(player, 'delivery');
+    const awardedScore = this._applyComboScore(totalScore, combo.multiplier);
+    player.recordStat('crystalsDelivered', deliveredCount);
+    player.recordStat('deliveryScore', awardedScore);
+    this.stats[player.faction].crystals += deliveredCount;
+    this.stats[player.faction].deliveryScore += awardedScore;
+    return { awardedScore, combo };
+  }
+
+  _recordAbilityUse(player) {
+    if (!player) return;
+    player.recordStat('abilitiesUsed');
+    this.stats[player.faction].abilitiesUsed++;
+  }
+
   _clearChaosEvent() {
     this.chaosEvent = null;
     this._clearHighValueBase();
@@ -1893,21 +2292,13 @@ export class Game {
     this.damageLedger.get(target).set(attackerFaction, this.elapsed);
   }
 
-  _recordElimination(victim, killerFaction, reason = 'eliminated') {
+  _recordElimination(victim, killerFaction, reason = 'eliminated', neutralLabel = 'NEXUS GUARDIAN') {
     const killerPlayer = typeof killerFaction === 'string' ? null : killerFaction;
     const killerSide = killerPlayer?.faction ?? killerFaction;
+    this._resetMomentum(victim);
     victim.alive = false;
     victim.respawnTimer = 5 * this._getRespawnTimeMultiplier(victim.faction);
-    this.sparks.push(...Particle.burst(victim.x, victim.y, FACTIONS[victim.faction].color, 18, {
-      speedMin: 35,
-      speedMax: 180,
-      lifeMin: 0.6,
-      lifeMax: 1.35,
-      sizeMin: 1.8,
-      sizeMax: 3.8,
-      drag: 2.1,
-      gravity: -6,
-    }));
+    this.sparks.push(...this._spawnDeathEffect(victim));
 
     // Death penalty: drop ALL carried jewels
     victim.dropAllJewels(this);
@@ -1925,18 +2316,28 @@ export class Game {
         (killerPlayer.passiveState.overclockStacks ?? 0) + 1,
       );
     }
+    victim.recordStat('deaths');
     this.stats[victim.faction].deaths++;
     if (killerSide && this.stats[killerSide]) {
+      let killScore = KILL_SCORE;
+      let combo = { count: 0, multiplier: 1, active: false };
+      if (killerPlayer) {
+        killerPlayer.killStreak = (killerPlayer.killStreak ?? 0) + 1;
+        combo = this._registerComboAction(killerPlayer, 'kill');
+        killScore = this._applyComboScore(KILL_SCORE, combo.multiplier);
+        this._applyKillStreakRewards(killerPlayer);
+      }
+      killerPlayer?.recordStat('kills');
       this.stats[killerSide].kills++;
-      this.scores[killerSide] += KILL_SCORE;
+      this.scores[killerSide] += killScore;
       this.events.push({
-        text: `${killerSide.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
+        text: `${killerSide.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${killScore}${combo.active ? ` • ${this._formatComboMultiplier(combo.multiplier)}` : ''})`,
         faction: killerSide,
         ttl: 3,
       });
     } else {
       this.events.push({
-        text: `☠️ NEXUS GUARDIAN eliminated ${victim.faction.toUpperCase()}`,
+        text: `☠️ ${neutralLabel} ${reason} ${victim.faction.toUpperCase()}`,
         faction: victim.faction,
         ttl: 3,
       });
@@ -1944,9 +2345,20 @@ export class Game {
 
     const ledger = this.damageLedger.get(victim);
     if (ledger && killerSide && this.stats[killerSide]) {
-      for (const [assistFaction, hitTime] of ledger.entries()) {
+      const assistMap = new Map();
+      for (const [attacker, hitTime] of ledger.entries()) {
+        const assistPlayer = typeof attacker === 'string' ? null : attacker;
+        const assistFaction = assistPlayer?.faction ?? attacker;
+        if (!assistFaction) continue;
         if (assistFaction === killerSide) continue;
         if ((this.elapsed - hitTime) > ASSIST_WINDOW) continue;
+        const prev = assistMap.get(assistFaction);
+        if (!prev || hitTime > prev.hitTime) {
+          assistMap.set(assistFaction, { player: assistPlayer, hitTime });
+        }
+      }
+      for (const [assistFaction, assist] of assistMap.entries()) {
+        assist.player?.recordStat('assists');
         this.stats[assistFaction].assists++;
         this.scores[assistFaction] += ASSIST_SCORE;
         this.events.push({
@@ -1971,12 +2383,14 @@ export class Game {
           this.matchEnded = true;
           this.winnerFaction = faction;
           this.victoryTimer = 5;
+          this.sessionMatches++;
           this.audio.playMatchEnd(this.winnerFaction);
           this.events.push({
             text: `🏆 ${this.winnerFaction.toUpperCase()} reached ${this.config.winScore} pts — VICTORY!`,
             faction: this.winnerFaction,
             ttl: 5,
           });
+          this.replay.finalizeRecording();
           return;
         }
       }
@@ -1990,6 +2404,7 @@ export class Game {
         .sort((a, b) => b.score - a.score);
       this.winnerFaction = ranking[0].faction;
       this.victoryTimer = 5;
+      this.sessionMatches++;
       this.audio.playMatchEnd(this.winnerFaction);
       this.events.push({
         text: `⏰ TIME UP! ${this.winnerFaction.toUpperCase()} wins the match`,
@@ -2005,7 +2420,7 @@ export class Game {
     // Reset scores and stats
     for (const faction of ['blue', 'green', 'red']) {
       this.scores[faction] = 0;
-      this.stats[faction] = { kills: 0, deaths: 0, assists: 0, crystals: 0 };
+      this.stats[faction] = createFactionStats();
     }
 
     // Reset match state
@@ -2014,6 +2429,7 @@ export class Game {
     this.victoryTimer = 0;
     this.elapsed = 0;
     this.matchTimer = this.config.matchDuration;
+    this._resetZoneCollapse();
     this.events = [];
     this.projectiles = [];
     this.sparks = [];
@@ -2063,12 +2479,9 @@ export class Game {
       player.respawnTimer = 0;
       player.carrying = [];
       player.cooldown = Math.random() * player.abilityMax;
-      player.cooldown2 = 0;
-      player.ultCooldown = 0;
-      player.abilitySealTimer = 0;
-      player.hackLinkTimer = 0;
       player.trailPoints = [];
       player.lastCombatTime = -Infinity;
+      player.resetMatchStats();
       player.passiveState.deliveryBonusActive = false;
       player.passiveState.bioRegenActive = false;
       player.passiveState.bioRegenDelayRemaining = 0;
@@ -2076,6 +2489,7 @@ export class Game {
       player.passiveState.overclockStacks = 0;
       player.passiveState.speedMult = 1;
       player.passiveState.sprintActive = false;
+      this._resetMomentum(player);
     }
 
     // Reset home bases
@@ -2211,6 +2625,148 @@ export class Game {
 
   _getRespawnTimeMultiplier(faction) {
     return this._getGuardianBlessing(faction).respawnTimeMult;
+  }
+
+  _getMomentumSpeedMultiplier(player) {
+    return (player?.killStreakSpeedTimer ?? 0) > 0 ? KILLSTREAK_SPEED_MULT : 1;
+  }
+
+  _getMomentumDamageMultiplier(player) {
+    return (player?.rampageTimer ?? 0) > 0 ? KILLSTREAK_RAMPAGE_MULT : 1;
+  }
+
+  _consumeInstantCooldownReset(player) {
+    if (!player?.instantCooldownReady) return false;
+    player.instantCooldownReady = false;
+    player.momentumDetail = '';
+    player.momentumNoticeTimer = Math.max(player.momentumNoticeTimer ?? 0, MOMENTUM_CONSUMED_NOTICE_DURATION);
+    return true;
+  }
+
+  _updateMomentumTimers(player, dt) {
+    if (!player) return;
+    if ((player.killStreakSpeedTimer ?? 0) > 0) {
+      player.killStreakSpeedTimer = Math.max(0, player.killStreakSpeedTimer - dt);
+    }
+    if ((player.rampageTimer ?? 0) > 0) {
+      player.rampageTimer = Math.max(0, player.rampageTimer - dt);
+    }
+    if ((player.comboTimer ?? 0) > 0) {
+      player.comboTimer = Math.max(0, player.comboTimer - dt);
+      if (player.comboTimer <= 0) {
+        player.comboCount = 0;
+        player.comboMultiplier = 1;
+        player.lastComboAction = null;
+      }
+    }
+    if ((player.momentumNoticeTimer ?? 0) > 0) {
+      player.momentumNoticeTimer = Math.max(0, player.momentumNoticeTimer - dt);
+      if (player.momentumNoticeTimer <= 0) {
+        player.momentumNotice = '';
+        if (!player.instantCooldownReady) player.momentumDetail = '';
+      }
+    }
+    if ((player.comboFlashTimer ?? 0) > 0) {
+      player.comboFlashTimer = Math.max(0, player.comboFlashTimer - dt);
+    }
+  }
+
+  _resetMomentum(player) {
+    if (!player) return;
+    player.killStreak = 0;
+    player.comboCount = 0;
+    player.comboTimer = 0;
+    player.comboMultiplier = 1;
+    player.killStreakSpeedTimer = 0;
+    player.rampageTimer = 0;
+    player.instantCooldownReady = false;
+    player.momentumNotice = '';
+    player.momentumDetail = '';
+    player.momentumNoticeTimer = 0;
+    player.comboFlashTimer = 0;
+    player.lastComboAction = null;
+  }
+
+  _registerComboAction(player, actionType) {
+    if (!player) return { count: 0, multiplier: 1, active: false };
+    player.comboCount = (player.comboTimer ?? 0) > 0
+      ? (player.comboCount ?? 0) + 1
+      : 1;
+    player.comboTimer = COMBO_WINDOW;
+    player.comboMultiplier = this._getComboMultiplier(player.comboCount);
+    player.comboFlashTimer = MOMENTUM_FLASH_DURATION;
+    player.lastComboAction = actionType;
+    return {
+      count: player.comboCount,
+      multiplier: player.comboMultiplier,
+      active: player.comboCount > 1,
+    };
+  }
+
+  _getComboMultiplier(count) {
+    if (!count || count <= 1) return 1;
+    return Math.min(COMBO_MAX_MULT, 1 + (count - 1) * COMBO_MULT_STEP);
+  }
+
+  _applyComboScore(baseScore, multiplier = 1) {
+    return Math.max(0, Math.round(baseScore * multiplier));
+  }
+
+  _formatComboMultiplier(multiplier = 1) {
+    return `x${Number.isInteger(multiplier) ? multiplier : multiplier.toFixed(1)}`;
+  }
+
+  _setMomentumNotice(player, notice, detail = '') {
+    if (!player) return;
+    player.momentumNotice = notice;
+    player.momentumDetail = detail;
+    player.momentumNoticeTimer = MOMENTUM_NOTICE_DURATION;
+    player.comboFlashTimer = Math.max(player.comboFlashTimer ?? 0, MOMENTUM_FLASH_DURATION);
+  }
+
+  _applyKillStreakRewards(player) {
+    if (!player) return;
+    const streak = player.killStreak ?? 0;
+    let notice = '';
+    let detail = '';
+    if (streak === KILLSTREAK_SPEED_THRESHOLD) {
+      player.killStreakSpeedTimer = KILLSTREAK_SPEED_DURATION;
+      notice = 'DOUBLE KILL';
+      detail = `MOVE +${Math.round((KILLSTREAK_SPEED_MULT - 1) * 100)}% • ${KILLSTREAK_SPEED_DURATION}S`;
+    } else if (streak === KILLSTREAK_COOLDOWN_RESET_THRESHOLD) {
+      player.instantCooldownReady = true;
+      player.cooldown = 0;
+      player.cooldown2 = 0;
+      player.ultCooldown = 0;
+      notice = 'TRIPLE KILL';
+      detail = 'COOLDOWNS RESET • NEXT CAST FREE';
+    } else if (streak === KILLSTREAK_RAMPAGE_THRESHOLD) {
+      player.rampageTimer = KILLSTREAK_RAMPAGE_DURATION;
+      notice = 'RAMPAGE';
+      detail = `DAMAGE +${Math.round((KILLSTREAK_RAMPAGE_MULT - 1) * 100)}% • ${KILLSTREAK_RAMPAGE_DURATION}S`;
+    }
+    if (!notice) return;
+    this._setMomentumNotice(player, notice, detail);
+    this.events.push({
+      text: `🔥 ${player.faction.toUpperCase()} ${notice}${detail ? ` — ${detail}` : ''}`,
+      faction: player.faction,
+      ttl: 3,
+    });
+    this.sparks.push(...Particle.burst(player.x, player.y, FACTIONS[player.faction].color, 16, {
+      speedMin: 90,
+      speedMax: 260,
+      lifeMin: 0.45,
+      lifeMax: 1.1,
+      sizeMin: 2.2,
+      sizeMax: 4.6,
+      drag: 1.4,
+    }));
+    this.sparks.push(...Particle.ring(player.x, player.y, '#ffd966', 36 + streak * 4, {
+      life: 0.75,
+      growth: 120,
+      lineWidth: 4,
+    }));
+    if (player === this.localPlayer) this.audio.playKillStreak(streak);
   }
 
   _updatePassiveEffects(player, dt) {
@@ -2596,6 +3152,18 @@ export class Game {
     return {
       elapsed: round(this.elapsed),
       matchTimer: round(this.matchTimer),
+      zoneCollapse: this.zoneCollapse ? {
+        active: this.zoneCollapse.active,
+        progress: round(this.zoneCollapse.progress ?? 0, 4),
+        scoreGap: this.zoneCollapse.scoreGap ?? 0,
+        speedMultiplier: round(this.zoneCollapse.speedMultiplier ?? 0, 3),
+        centerX: round(this.zoneCollapse.centerX ?? 0),
+        centerY: round(this.zoneCollapse.centerY ?? 0),
+        startRadius: round(this.zoneCollapse.startRadius ?? 0),
+        minRadius: round(this.zoneCollapse.minRadius ?? 0),
+        currentRadius: round(this.zoneCollapse.currentRadius ?? 0),
+        damagePerSecond: round(this.zoneCollapse.damagePerSecond ?? 0, 4),
+      } : null,
       matchEnded: this.matchEnded,
       winnerFaction: this.winnerFaction,
       victoryTimer: round(this.victoryTimer),
@@ -2644,15 +3212,15 @@ export class Game {
           x: round(base.x),
           y: round(base.y),
           shieldPulse: round(base.shieldPulse),
-        crystalsStored: base.crystalsStored,
-        isHome: base.isHome,
-        captureProgress: round(base.captureProgress ?? 0),
-        captureFaction: base.captureFaction,
-        level: base.level ?? 0,
-        highValue: !!base.highValue,
-        highValueMultiplier: base.highValueMultiplier ?? 1,
-        scoreDisabledTimer: round(base.scoreDisabledTimer ?? 0),
-      }]),
+          crystalsStored: base.crystalsStored,
+          isHome: base.isHome,
+          captureProgress: round(base.captureProgress ?? 0),
+          captureFaction: base.captureFaction,
+          level: base.level ?? 0,
+          highValue: !!base.highValue,
+          highValueMultiplier: base.highValueMultiplier ?? 1,
+          scoreDisabledTimer: round(base.scoreDisabledTimer ?? 0),
+        }]),
       ),
       trilocks: this.trilocks.map(tl => ({
         faction: tl.faction,
@@ -2672,6 +3240,7 @@ export class Game {
       players: this.players.map(player => ({
         faction: player.faction,
         index: player.index,
+        job: player.job,
         x: round(player.x),
         y: round(player.y),
         vx: round(player.vx),
@@ -2688,12 +3257,24 @@ export class Game {
         hackLinkTimer: round(player.hackLinkTimer ?? 0),
         state: player.state,
         role: player.role,
+        killStreak: player.killStreak ?? 0,
+        comboCount: player.comboCount ?? 0,
+        comboTimer: round(player.comboTimer ?? 0),
+        comboMultiplier: round(player.comboMultiplier ?? 1, 2),
+        killStreakSpeedTimer: round(player.killStreakSpeedTimer ?? 0),
+        rampageTimer: round(player.rampageTimer ?? 0),
+        instantCooldownReady: !!player.instantCooldownReady,
+        momentumNotice: player.momentumNotice ?? '',
+        momentumDetail: player.momentumDetail ?? '',
+        momentumNoticeTimer: round(player.momentumNoticeTimer ?? 0),
+        comboFlashTimer: round(player.comboFlashTimer ?? 0),
         target: player.target ? { x: round(player.target.x), y: round(player.target.y) } : null,
         trailPoints: player.trailPoints.slice(-REPLAY_TRAIL_HISTORY_LENGTH).map(point => ({
           x: round(point.x),
           y: round(point.y),
           a: round(point.a ?? 1, 3),
         })),
+        stats: JSON.parse(JSON.stringify(player.stats)),
         carrying: [],
       })),
       crystals: this.crystals.map(crystal => ({
@@ -2721,6 +3302,7 @@ export class Game {
         radius: projectile.radius,
         life: round(projectile.life ?? 0),
         maxLife: round(projectile.maxLife ?? 0),
+        effectColor: projectile.effectColor ?? null,
       })),
     };
   }
@@ -2729,6 +3311,7 @@ export class Game {
     if (!frame) return;
     this.elapsed = frame.elapsed ?? 0;
     this.matchTimer = frame.matchTimer ?? MATCH_DURATION;
+    this.zoneCollapse = frame.zoneCollapse ? { ...frame.zoneCollapse } : this._createZoneCollapseState();
     this.matchEnded = !!frame.matchEnded;
     this.winnerFaction = frame.winnerFaction ?? null;
     this.victoryTimer = frame.victoryTimer ?? 0;
@@ -2780,6 +3363,7 @@ export class Game {
       player.vy = snapshot.vy;
       player.alive = snapshot.alive;
       player.respawnTimer = snapshot.respawnTimer;
+      player.job = snapshot.job ?? player.job;
       player.health = snapshot.health;
       player.maxHealth = snapshot.maxHealth;
       player.energy = snapshot.energy;
@@ -2790,8 +3374,20 @@ export class Game {
       player.hackLinkTimer = snapshot.hackLinkTimer ?? 0;
       player.state = snapshot.state;
       player.role = snapshot.role;
+      player.killStreak = snapshot.killStreak ?? 0;
+      player.comboCount = snapshot.comboCount ?? 0;
+      player.comboTimer = snapshot.comboTimer ?? 0;
+      player.comboMultiplier = snapshot.comboMultiplier ?? 1;
+      player.killStreakSpeedTimer = snapshot.killStreakSpeedTimer ?? 0;
+      player.rampageTimer = snapshot.rampageTimer ?? 0;
+      player.instantCooldownReady = !!snapshot.instantCooldownReady;
+      player.momentumNotice = snapshot.momentumNotice ?? '';
+      player.momentumDetail = snapshot.momentumDetail ?? '';
+      player.momentumNoticeTimer = snapshot.momentumNoticeTimer ?? 0;
+      player.comboFlashTimer = snapshot.comboFlashTimer ?? 0;
       player.target = snapshot.target ? { ...snapshot.target } : null;
       player.trailPoints = (snapshot.trailPoints ?? []).map(point => ({ ...point }));
+      player.stats = { ...player.stats, ...(snapshot.stats ?? {}) };
     });
 
     this.crystals = (frame.crystals ?? []).map(snapshot => ({
@@ -2808,6 +3404,7 @@ export class Game {
     this.projectiles = (frame.projectiles ?? []).map(projectile => ({ ...projectile }));
     this.focusedEnemy = this._findPlayerById(frame.focusedEnemyId);
     this.localPlayer = this._findPlayerById(frame.localPlayerId) ?? this.players.find(p => p.faction === 'blue') ?? null;
+    this._applyLocalCustomization();
     this.rallySignal = frame.rallySignal ? { ...frame.rallySignal } : null;
   }
 
@@ -2847,6 +3444,48 @@ export class Game {
   restartLiveMatch() {
     this.exitReplayPlayback();
     this._restart();
+  }
+
+  _focusSpectatorCamera(x, y, zoom = this.spectatorCamera?.zoom ?? 1) {
+    this.spectatorCamera = {
+      x: Math.max(0, Math.min(this.width, x)),
+      y: Math.max(0, Math.min(this.height, y)),
+      zoom,
+    };
+  }
+
+  _updateSpectatorState() {
+    if (!this.spectatorMode) {
+      this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+      return;
+    }
+    const observed = this.getObservedPlayer();
+    if (!observed) return;
+    if (this.spectatorCameraMode === 'follow') {
+      this._focusSpectatorCamera(observed.x, observed.y, 1.45);
+    } else {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+    }
+  }
+
+  _cycleSpectatorTarget(direction = 1) {
+    const roster = this.players.filter(player => player.alive);
+    if (!roster.length) {
+      this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+      this._updateSpectatorState();
+      return;
+    }
+    const current = this.spectatorTarget ? roster.indexOf(this.spectatorTarget) : -1;
+    const nextIndex = current < 0
+      ? 0
+      : (current + direction + roster.length) % roster.length;
+    this.spectatorTarget = roster[nextIndex];
+    this._updateSpectatorState();
+  }
+
+  _cycleSpectatorCameraMode() {
+    this.spectatorCameraMode = this.spectatorCameraMode === 'follow' ? 'overhead' : 'follow';
+    this._updateSpectatorState();
   }
 
   _toggleSpectatorMode() {
@@ -3138,6 +3777,15 @@ export class Game {
 
       // Emit event on faction change
       if (tl.faction && tl.faction !== prevFaction) {
+        this.stats[tl.faction].captures++;
+        for (const p of this.players) {
+          if (!p.alive || p.faction !== tl.faction) continue;
+          const d = Math.sqrt((p.x - tl.x) ** 2 + (p.y - tl.y) ** 2);
+          if (d < CAPTURE_RANGE) {
+            p.recordStat('baseCaptures');
+            this._registerComboAction(p, 'capture');
+          }
+        }
         this.events.push({
           text: `🏰 ${tl.faction.toUpperCase()} captured a TRILOCK!`,
           faction: tl.faction,

@@ -5,6 +5,7 @@
  */
 
 import { FACTIONS, JOBS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+import { resolveArmorColor, resolveEffectColor } from './customization.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ function withAlpha(hex, a) {
 
 const RING_PARTICLE_ALPHA = 0.95;
 const CAMERA_ZOOM_THRESHOLD = 1.001;
+const ZONE_COLLAPSE_NOISE_ANGLE_OFFSET = 0.61;
 
 // ── Renderer class ────────────────────────────────────────────────────────────
 
@@ -121,6 +123,7 @@ export class Renderer {
 
     // ── Chaos event effects ────────────────────────────────────────────
     this._drawChaosEvent(world);
+    this._drawZoneCollapse(world);
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
@@ -503,25 +506,70 @@ export class Renderer {
   _drawTrail(player) {
     const ctx  = this.ctx;
     const pts  = player.trailPoints;
-    const col  = FACTIONS[player.faction].color;
+    const col  = player.appearance
+      ? resolveEffectColor(player.appearance.effectColor)
+      : FACTIONS[player.faction].color;
+    const trailEffect = player.appearance?.trailEffect ?? 'sparks';
     if (pts.length < 2) return;
     ctx.save();
     if (player.job === 'hacker') {
-      ctx.setLineDash([4, 5]);
       ctx.lineCap = 'square';
+      ctx.setLineDash([4, 5]);
+      ctx.fillStyle = withAlpha(col, 0.9);
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.45);
+        ctx.lineWidth = 1.6 * p1.a;
+        ctx.stroke();
+        ctx.fillRect(p1.x - 1.6, p1.y - 1.6, 3.2 * p1.a, 3.2 * p1.a);
+      }
+      ctx.setLineDash([]);
+    } else if (trailEffect === 'data') {
+      ctx.fillStyle = withAlpha(col, 0.85);
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.35);
+        ctx.lineWidth = 1.2 * p1.a;
+        ctx.setLineDash([3, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillRect(p1.x - 1.5, p1.y - 1.5, 3 * p1.a, 3 * p1.a);
+      }
+    } else if (trailEffect === 'hologram') {
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y - 2);
+        ctx.lineTo(p1.x, p1.y - 2);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.28);
+        ctx.lineWidth = 4 * p1.a;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y + 1);
+        ctx.lineTo(p1.x, p1.y + 1);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.7);
+        ctx.lineWidth = 1.6 * p1.a;
+        ctx.stroke();
+      }
+    } else {
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.55);
+        ctx.lineWidth   = 2.5 * p1.a;
+        ctx.shadowBlur  = 6;
+        ctx.shadowColor = col;
+        ctx.stroke();
+      }
     }
-    for (let i = 1; i < pts.length; i++) {
-      const p0 = pts[i - 1], p1 = pts[i];
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = withAlpha(col, p1.a * 0.55);
-      ctx.lineWidth   = 2.5 * p1.a;
-      ctx.shadowBlur  = 6;
-      ctx.shadowColor = col;
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
     ctx.restore();
   }
 
@@ -530,7 +578,15 @@ export class Renderer {
   _drawPlayer(player) {
     const ctx = this.ctx;
     const f   = FACTIONS[player.faction];
-    const { r, g, b } = hexToRgb(f.color);
+    const armorColor = player.appearance
+      ? resolveArmorColor(f.color, player.appearance.armorColor)
+      : f.color;
+    const effectColor = player.appearance
+      ? resolveEffectColor(player.appearance.effectColor)
+      : f.color;
+    const { r, g, b } = hexToRgb(armorColor);
+    const effectRgb = hexToRgb(effectColor);
+    const factionRgb = hexToRgb(f.color);
 
     ctx.save();
     ctx.translate(player.x, player.y);
@@ -538,7 +594,7 @@ export class Renderer {
     if (!player.alive) {
       // Ghost (respawning)
       ctx.globalAlpha = 0.25;
-      ctx.fillStyle   = f.color;
+      ctx.fillStyle   = armorColor;
       ctx.beginPath();
       ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
       ctx.fill();
@@ -548,11 +604,11 @@ export class Renderer {
 
     const glowA = 0.55 + 0.35 * Math.sin(player.glowPulse);
     ctx.shadowBlur  = 16;
-    ctx.shadowColor = f.color;
+    ctx.shadowColor = armorColor;
 
     // Body
     ctx.fillStyle   = `rgba(${r},${g},${b},0.25)`;
-    ctx.strokeStyle = `rgba(${r},${g},${b},${glowA})`;
+    ctx.strokeStyle = `rgba(${factionRgb.r},${factionRgb.g},${factionRgb.b},${glowA})`;
     ctx.lineWidth   = 2;
     ctx.beginPath();
     ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
@@ -560,14 +616,14 @@ export class Renderer {
     ctx.stroke();
 
     // Neon core dot
-    ctx.fillStyle   = `rgba(${r},${g},${b},0.9)`;
+    ctx.fillStyle   = `rgba(${effectRgb.r},${effectRgb.g},${effectRgb.b},0.9)`;
     ctx.beginPath();
     ctx.arc(0, 0, 3, 0, Math.PI * 2);
     ctx.fill();
 
     // Faction-specific overlay
     ctx.shadowBlur  = 0;
-    ctx.strokeStyle = `rgba(${r},${g},${b},0.75)`;
+    ctx.strokeStyle = `rgba(${factionRgb.r},${factionRgb.g},${factionRgb.b},0.75)`;
     ctx.lineWidth   = 1;
     if (player.faction === 'blue') {
       // Crosshair (sniper)
@@ -610,7 +666,7 @@ export class Renderer {
     }
 
     const itemLabel = JOBS[player.job]?.emoji ?? '⚔️';
-    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+    ctx.fillStyle = `rgba(${effectRgb.r},${effectRgb.g},${effectRgb.b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(itemLabel, 0, PLAYER_RADIUS + 16);
@@ -665,13 +721,14 @@ export class Renderer {
     ctx.save();
     for (const proj of projectiles) {
       const f   = FACTIONS[proj.faction];
-      const { r, g, b } = hexToRgb(f.color);
+      const color = proj.effectColor ?? f.color;
+      const { r, g, b } = hexToRgb(color);
       const a   = proj.alpha;
 
       if (proj.type === 'railshot') {
         // Bright energy bolt with glow trail
         ctx.shadowBlur  = this.lowQuality ? 8 : 16;
-        ctx.shadowColor = f.color;
+        ctx.shadowColor = color;
         ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
         ctx.lineWidth   = 3;
         ctx.beginPath();
@@ -688,7 +745,7 @@ export class Renderer {
         ctx.strokeStyle = `rgba(${r},${g},${b},${a * pulse * 0.6})`;
         ctx.lineWidth   = 2;
         ctx.shadowBlur  = this.lowQuality ? 6 : 14;
-        ctx.shadowColor = f.color;
+        ctx.shadowColor = color;
         ctx.beginPath();
         ctx.arc(proj.x, proj.y, proj.radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -701,7 +758,7 @@ export class Renderer {
       } else if (proj.type === 'powerdash') {
         // Blazing charge trail
         ctx.shadowBlur  = this.lowQuality ? 6 : 12;
-        ctx.shadowColor = f.color;
+        ctx.shadowColor = color;
         ctx.fillStyle   = `rgba(${r},${g},${b},${a * 0.8})`;
         ctx.beginPath();
         ctx.arc(proj.x, proj.y, proj.radius * a, 0, Math.PI * 2);
@@ -716,8 +773,8 @@ export class Renderer {
       } else if (proj.type === 'exploit' || proj.type === 'dataspike' || proj.type === 'systembreach') {
         const ringRadius = proj.type === 'systembreach' ? proj.radius : 10 + (1 - a) * 10;
         ctx.shadowBlur = this.lowQuality ? 8 : 16;
-        ctx.shadowColor = f.color;
-        ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.9})`;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, a * 0.9)})`;
         ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.22})`;
         ctx.lineWidth = proj.type === 'systembreach' ? 3 : 2;
         ctx.beginPath();
@@ -1049,6 +1106,75 @@ export class Renderer {
       }
       ctx.restore();
     }
+  }
+
+  _drawZoneCollapse(world) {
+    const zone = world.zoneCollapse;
+    if (!zone?.active) return;
+
+    const ctx = this.ctx;
+    const t = this.time;
+    const pulse = 0.45 + 0.3 * Math.sin(t * 6);
+    const radius = zone.currentRadius;
+    const cx = zone.centerX;
+    const cy = zone.centerY;
+
+    ctx.save();
+    ctx.fillStyle = `rgba(255,68,68,${0.08 + pulse * 0.06})`;
+    ctx.beginPath();
+    ctx.rect(0, 0, world.width, world.height);
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
+    ctx.fill('evenodd');
+
+    ctx.strokeStyle = `rgba(255,120,120,${0.55 + pulse * 0.25})`;
+    ctx.lineWidth = 4;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#ff6a6a';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.lineWidth = 1.4;
+    ctx.shadowBlur = 0;
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2 + t * 0.7;
+      const arcX = cx + Math.cos(angle) * radius;
+      const arcY = cy + Math.sin(angle) * radius;
+      const tangentAngle = angle + Math.PI / 2;
+      const length = 12 + 4 * Math.sin(t * 10 + i);
+      ctx.strokeStyle = i % 2 === 0
+        ? `rgba(255,220,220,${0.42 + pulse * 0.2})`
+        : `rgba(120,220,255,${0.28 + pulse * 0.16})`;
+      ctx.beginPath();
+      ctx.moveTo(
+        arcX - Math.cos(tangentAngle) * length,
+        arcY - Math.sin(tangentAngle) * length,
+      );
+      ctx.lineTo(
+        arcX + Math.cos(tangentAngle) * length,
+        arcY + Math.sin(tangentAngle) * length,
+      );
+      ctx.stroke();
+    }
+
+    if (!this.lowQuality) {
+      ctx.globalAlpha = 0.3 + pulse * 0.18;
+      for (let i = 0; i < 28; i++) {
+        const angle = (i * ZONE_COLLAPSE_NOISE_ANGLE_OFFSET) + t * 0.9;
+        const noiseRadius = radius + 16 + (i % 5) * 18;
+        const px = cx + Math.cos(angle) * noiseRadius;
+        const py = cy + Math.sin(angle) * noiseRadius;
+        ctx.fillStyle = i % 3 === 0 ? '#ffd3d3' : '#ff7a7a';
+        ctx.fillRect(px, py, 3 + (i % 2), 1.5 + (i % 3));
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.fillStyle = `rgba(255,210,210,${0.72 + pulse * 0.2})`;
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ZONE COLLAPSE', cx, cy - radius - 12);
+    ctx.restore();
   }
 
   _drawFeaturePulse(world) {
@@ -1465,11 +1591,20 @@ export class Renderer {
         ctx.fillRect(px, py, size * 2, size);
       }
       ctx.restore();
-    } else if (filters.chaosZones && world.chaosEvent) {
+    } else if (filters.chaosZones && (world.chaosEvent || world.zoneCollapse?.active)) {
       const event = world.chaosEvent;
       const pulse = 0.15 + 0.18 * Math.sin(this.time * 8);
       ctx.save();
-      if (event.type === 'emp_storm') {
+      if (world.zoneCollapse?.active) {
+        const zone = world.zoneCollapse;
+        ctx.strokeStyle = withAlpha('#ff6666', 0.45 + pulse);
+        ctx.fillStyle = withAlpha('#ff6666', 0.08 + pulse * 0.16);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mx(zone.centerX), my(zone.centerY), (zone.currentRadius / wW) * mapW, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (event.type === 'emp_storm') {
         ctx.strokeStyle = withAlpha(event.color, 0.5 + pulse);
         ctx.fillStyle = withAlpha(event.color, pulse * 0.45);
         ctx.lineWidth = 1.5;

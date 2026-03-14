@@ -225,14 +225,13 @@ Controls (browser preview):
 - `Space`: activate your primary job ability
 - `F`: activate your secondary job ability
 - `R`: activate your ultimate job ability
-- `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT)
+- `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT, agent appearance)
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
 - `V`: toggle spectator mode at any time during the match
 - `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
 - `[` / `]`: switch the followed agent in spectator mode
-- `R`: enter replay mode after a match ends
 - `L`: load a saved replay file
 - `Space`: play/pause replay playback (in replay mode)
 - `[` / `]`: seek backward/forward 5 seconds in replay
