@@ -177,6 +177,10 @@ export class HUD {
         <div class="feature-line"><span>WHEN</span><b id="feature-when">—</b></div>
         <div class="feature-line"><span>WHAT</span><b id="feature-what">—</b></div>
         <div class="feature-line"><span>STATUS</span><b id="feature-status">PENDING</b></div>
+        <div class="panel-title blue" style="margin-top:6px">NEXUS GUARDIAN</div>
+        <div class="feature-line"><span>STATE</span><b id="guardian-status">SPAWN IN 2:00</b></div>
+        <div class="feature-line"><span>VITALS</span><b id="guardian-vitals">OFFLINE</b></div>
+        <div class="feature-line"><span>BLESSING</span><b id="guardian-blessing">—</b></div>
       `;
     }
 
@@ -299,6 +303,7 @@ export class HUD {
 
     // Feature contract
     this._updateFeature(world);
+    this._updateGuardian(world);
 
     // Alliance indicator
     this._updateAlliance(world);
@@ -421,6 +426,38 @@ export class HUD {
     `;
   }
 
+  _formatTimer(seconds) {
+    const total = Math.max(0, Math.ceil(seconds ?? 0));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _updateGuardian(world) {
+    const status = document.getElementById('guardian-status');
+    const vitals = document.getElementById('guardian-vitals');
+    const blessing = document.getElementById('guardian-blessing');
+    const guardian = world.nexusGuardian;
+    if (!status || !vitals || !blessing || !guardian) return;
+
+    if (guardian.state === 'active') {
+      status.textContent = 'ACTIVE';
+      vitals.textContent = `${Math.ceil(guardian.health)} / ${guardian.maxHealth}`;
+    } else if (guardian.state === 'respawning') {
+      status.textContent = `RESPAWN ${this._formatTimer(guardian.timer)}`;
+      vitals.textContent = `HP ×${(1.5 ** guardian.spawnCount).toFixed(2)}`;
+    } else {
+      status.textContent = `SPAWN ${this._formatTimer(guardian.timer)}`;
+      vitals.textContent = 'OFFLINE';
+    }
+
+    const activeBlessing = Object.entries(world.guardianBlessings ?? {})
+      .sort((a, b) => (b[1]?.timer ?? 0) - (a[1]?.timer ?? 0))[0];
+    blessing.textContent = activeBlessing
+      ? `${activeBlessing[0].toUpperCase()} ${Math.ceil(activeBlessing[1].timer)}s`
+      : '—';
+  }
+
   _passiveRow(icon, label, value) {
     return `
       <div class="passive-row">
@@ -510,6 +547,9 @@ export class HUD {
     if (baseAlert?.active) {
       text = 'ALERT — BASE UNDER ATTACK';
       tone = 'alert';
+    } else if (world.nexusGuardian?.state === 'active') {
+      text = '🛡️ NEXUS GUARDIAN ACTIVE';
+      tone = 'chaos';
     } else if (world.chaosEvent) {
       text = `${world.chaosEvent.emoji} ${world.chaosEvent.name} ACTIVE`;
       tone = 'chaos';

@@ -406,13 +406,14 @@ export class Player {
 
     const rallying = this._applyRallyCommand(world);
     const pinning = !rallying && this._applyPinCommand(world);
+    const guardianing = !rallying && !pinning && this._applyGuardianObjective(world);
 
     // ── Hate control: bias toward leading team ──────────────────────────────
     // Fighters prefer to target the leading faction
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    if (!rallying && !pinning) {
+    if (!rallying && !pinning && !guardianing) {
       switch (this.role) {
         case 'collector': this._aiCollector(world, homeBase); break;
         case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
@@ -423,7 +424,7 @@ export class Player {
     // Pick up jewel when close
     if (this.state === 'carry' && this.target instanceof MemoryCrystal) {
       if (!this.target.delivered && !this.target.carrier && this.carrying.length < MAX_CARRY &&
-          dist(this.x, this.y, this.target.x, this.target.y) < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
+          dist(this.x, this.y, this.target.x, this.target.y) < world._getCrystalPickupRadius(this.faction)) {
         this.target.carrier = this;
         this.target.pickupLockOwner = null;
         this.target.pickupLockTimer = 0;
@@ -570,6 +571,22 @@ export class Player {
     return true;
   }
 
+  _applyGuardianObjective(world) {
+    const guardian = world.nexusGuardian;
+    if (!guardian || guardian.state !== 'active' || this.isPlayerControlled) return false;
+    if (world.guardianBlessings?.[this.faction]) return false;
+    if (this.role === 'collector') return false;
+    const enemy = world._nearestEnemy(guardian.x, guardian.y, this.faction);
+    if (enemy && dist(enemy.x, enemy.y, guardian.x, guardian.y) <= guardian.arenaRadius * 1.1) {
+      this.target = enemy;
+      this.state = 'attack';
+      return true;
+    }
+    this.target = guardian;
+    this.state = 'attack';
+    return true;
+  }
+
   // Fighter: enemy elimination specialist — biased toward leading team (hate control)
   _aiFighter(world, base, leadFaction) {
     if (this.state === 'roam' || !this.target) {
@@ -663,7 +680,8 @@ export class Player {
     const d  = Math.sqrt(dx * dx + dy * dy);
     if (d < 2) return;
     const speedMult = (world.factionBuffs?.[this.faction]?.speedMult ?? 1) *
-      (this.passiveState?.speedMult ?? 1);
+      (this.passiveState?.speedMult ?? 1) *
+      (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1);
     const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
     this.vx = lerp(this.vx, nx * effSpeed, 0.12);
