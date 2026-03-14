@@ -327,7 +327,8 @@ export class Game {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  start() {
+  start(chosenFaction = 'blue') {
+    this.chosenFaction = chosenFaction;
     this._resize();
     window.addEventListener('resize', () => this._resize());
     this._spawn();
