@@ -224,6 +224,7 @@ Controls (browser preview):
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
+- After a match ends, the replay panel auto-saves the recording in-session, supports seek + 0.25× / 0.5× / 1× / 2× / 4× playback, exports JSON, and uses `W/A/S/D` + `+/-` for replay spectator pan/zoom
 
 ---
 

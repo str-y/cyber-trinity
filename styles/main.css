@@ -266,6 +266,7 @@ html, body {
   padding: 12px 14px;
   backdrop-filter: blur(8px);
   box-shadow: 0 0 18px rgba(74, 168, 255, 0.25);
+  pointer-events: auto;
 }
 
 .scoreboard-winner {
@@ -298,6 +299,78 @@ html, body {
 .scoreboard-header span:not(:first-child) {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.replay-panel {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: auto;
+}
+
+.replay-actions,
+.replay-timeline-row,
+.replay-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-actions {
+  flex-wrap: wrap;
+}
+
+.replay-panel button,
+.replay-panel select,
+.replay-panel input[type="range"] {
+  pointer-events: auto;
+}
+
+.replay-panel button,
+.replay-panel select {
+  background: rgba(4, 18, 44, 0.92);
+  color: #a0d4ff;
+  border: 1px solid rgba(100, 180, 255, 0.35);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.replay-panel button:disabled,
+.replay-panel select:disabled {
+  opacity: 0.45;
+}
+
+.replay-panel input[type="range"] {
+  flex: 1;
+  accent-color: #4aa8ff;
+}
+
+.replay-timeline-row span,
+.replay-meta label,
+#replay-status,
+.replay-hint {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.replay-timeline-row span,
+.replay-meta label {
+  opacity: 0.65;
+}
+
+#replay-status {
+  color: #a0d4ff;
+  opacity: 0.85;
+}
+
+.replay-hint {
+  opacity: 0.55;
 }
 
 /* ── Faction legend (top left) ── */
