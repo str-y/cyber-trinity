@@ -10,6 +10,12 @@ import { FACTIONS } from './entities.js';
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
 const DEFAULT_AGENT_LABEL = 'AGENT';
+const FACTION_NAMES = {
+  blue: 'THE ARCHIVE',
+  green: 'LIFE FORGE',
+  red: 'CORE PROTOCOL',
+};
+const RANK_BADGES = ['🥇', '🥈', '🥉'];
 
 export class HUD {
   constructor() {
@@ -37,7 +43,6 @@ export class HUD {
     if (!scorePanel) return;
 
     const factions = ['blue', 'green', 'red'];
-    const names    = ['THE ARCHIVE', 'LIFE FORGE', 'CORE PROTOCOL'];
     factions.forEach((f, i) => {
       if (i > 0) {
         const div = document.createElement('span');
@@ -48,7 +53,7 @@ export class HUD {
       const block = document.createElement('div');
       block.className = 'score-block';
       block.innerHTML = `
-        <span class="score-label ${f}">${names[i]}</span>
+        <span class="score-label ${f}">${FACTION_NAMES[f]}</span>
         <span class="score-value ${f}" id="score-${f}">0</span>
       `;
       scorePanel.appendChild(block);
@@ -71,7 +76,7 @@ export class HUD {
       row.className = 'legend-row';
       row.innerHTML = `
         <div class="legend-dot ${f}"></div>
-        <span class="${f}" style="opacity:0.85">${names[i]}</span>
+        <span class="${f}" style="opacity:0.85">${FACTION_NAMES[f]}</span>
         <span style="opacity:0.45;font-size:9px">&nbsp;— ${jobSummary}</span>
       `;
       legend.appendChild(row);
@@ -222,14 +227,16 @@ export class HUD {
     const scoreboard = document.getElementById('match-scoreboard');
     if (scoreboard) {
       scoreboard.innerHTML = `
-        <div class="panel-title">MATCH RESULT</div>
+        <div class="panel-title" id="scoreboard-title">LIVE SCOREBOARD</div>
         <div class="scoreboard-winner" id="scoreboard-winner">—</div>
         <div class="scoreboard-header">
-          <span>FACTION</span><span>K</span><span>D</span><span>A</span><span>💎</span><span>PTS</span>
+          <span>RANK</span><span>FACTION</span><span>K</span><span>D</span><span>A</span><span>💎</span><span>PTS</span>
         </div>
-        <div class="scoreboard-row"><span class="blue">THE ARCHIVE</span><span id="sb-blue-kills">0</span><span id="sb-blue-deaths">0</span><span id="sb-blue-assists">0</span><span id="sb-blue-crystals">0</span><span id="sb-blue-score">0</span></div>
-        <div class="scoreboard-row"><span class="green">LIFE FORGE</span><span id="sb-green-kills">0</span><span id="sb-green-deaths">0</span><span id="sb-green-assists">0</span><span id="sb-green-crystals">0</span><span id="sb-green-score">0</span></div>
-        <div class="scoreboard-row"><span class="red">CORE PROTOCOL</span><span id="sb-red-kills">0</span><span id="sb-red-deaths">0</span><span id="sb-red-assists">0</span><span id="sb-red-crystals">0</span><span id="sb-red-score">0</span></div>
+        <div id="scoreboard-factions"></div>
+        <div class="scoreboard-sections">
+          <div class="scoreboard-section" id="scoreboard-mvp"></div>
+          <div class="scoreboard-section" id="scoreboard-session"></div>
+        </div>
         <div class="replay-panel" id="replay-panel">
           <div class="panel-title blue">MATCH REPLAY</div>
           <div class="replay-actions">
@@ -596,28 +603,90 @@ export class HUD {
     const replayState = world.replay?.getHudState?.() ?? { available: false, active: false };
     const finalReplayFrame = world.replay?.savedReplay?.frames?.at?.(-1) ?? null;
     const summaryWorld = replayState.active && finalReplayFrame ? finalReplayFrame : world;
-    const visible = !!world.matchEnded || replayState.active;
+    const liveScoreboard = !!world.input?.target && !world.matchEnded && !world.spectatorMode && !replayState.active;
+    const visible = !!world.matchEnded || replayState.active || liveScoreboard;
     this._scoreboardEl.style.display = visible ? 'flex' : 'none';
     if (!visible) return;
 
+    const title = document.getElementById('scoreboard-title');
     const winner = document.getElementById('scoreboard-winner');
+    const factionsEl = document.getElementById('scoreboard-factions');
+    const mvpEl = document.getElementById('scoreboard-mvp');
+    const sessionEl = document.getElementById('scoreboard-session');
+    const ranking = this._getFactionRanking(summaryWorld);
+    const leadFaction = ranking[0]?.faction ?? summaryWorld.winnerFaction ?? 'blue';
+    if (title) {
+      title.textContent = replayState.active
+        ? 'REPLAY RESULT'
+        : world.matchEnded
+          ? 'MATCH RESULT'
+          : 'LIVE SCOREBOARD';
+    }
     if (winner) {
-      const winnerFaction = summaryWorld.winnerFaction ? summaryWorld.winnerFaction.toUpperCase() : 'UNKNOWN';
-      winner.textContent = `${winnerFaction} VICTORY`;
+      winner.textContent = world.matchEnded || replayState.active
+        ? `${(summaryWorld.winnerFaction ?? leadFaction).toUpperCase()} VICTORY`
+        : `${leadFaction.toUpperCase()} LEADS`;
     }
 
-    for (const faction of ['blue', 'green', 'red']) {
-      const stats = summaryWorld.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
-      const score = summaryWorld.scores[faction] ?? 0;
-      const set = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = String(val);
-      };
-      set(`sb-${faction}-kills`, stats.kills);
-      set(`sb-${faction}-deaths`, stats.deaths);
-      set(`sb-${faction}-assists`, stats.assists);
-      set(`sb-${faction}-crystals`, stats.crystals);
-      set(`sb-${faction}-score`, score);
+    if (factionsEl) {
+      factionsEl.innerHTML = ranking.map((entry, index) => {
+        const stats = entry.stats ?? {};
+        return `
+          <div class="scoreboard-row">
+            <span class="scoreboard-rank">${RANK_BADGES[index] ?? `${index + 1}.`}</span>
+            <span class="${entry.faction}">${entry.name}</span>
+            <span>${stats.kills ?? 0}</span>
+            <span>${stats.deaths ?? 0}</span>
+            <span>${stats.assists ?? 0}</span>
+            <span>${stats.crystals ?? 0}</span>
+            <span>${entry.score}</span>
+          </div>
+          <div class="scoreboard-detail ${entry.faction}">
+            PICK ${stats.crystalsCollected ?? 0} · CAP ${stats.captures ?? 0} · CHAOS ${Math.round(stats.chaosActivity ?? 0)}s · ABL ${stats.abilitiesUsed ?? 0}
+          </div>
+        `;
+      }).join('');
+    }
+
+    if (mvpEl) {
+      const topPlayer = this._getPlayerRanking(summaryWorld)[0] ?? null;
+      mvpEl.innerHTML = topPlayer
+        ? `
+          <div class="panel-title ${topPlayer.player.faction}">${world.matchEnded || replayState.active ? 'MATCH MVP' : 'LIVE MVP'}</div>
+          <div class="mvp-card ${topPlayer.player.faction}">
+            <div class="mvp-name">${FACTIONS[topPlayer.player.faction]?.emoji ?? '⭐'} ${DEFAULT_AGENT_LABEL} ${topPlayer.player.index + 1} · ${(topPlayer.player.job ?? 'agent').toUpperCase()}</div>
+            <div class="mvp-badge">★ MVP HIGHLIGHT</div>
+            <div class="mvp-stats">
+              <span>${topPlayer.stats.kills ?? 0}K / ${topPlayer.stats.deaths ?? 0}D / ${topPlayer.stats.assists ?? 0}A</span>
+              <span>PICK ${topPlayer.stats.crystalsCollected ?? 0}</span>
+              <span>💎 ${topPlayer.stats.crystalsDelivered ?? 0}</span>
+              <span>PTS ${Math.round(topPlayer.stats.deliveryScore ?? 0)}</span>
+              <span>CAP ${topPlayer.stats.baseCaptures ?? 0}</span>
+            </div>
+          </div>
+        `
+        : '<div class="panel-title">MATCH MVP</div><div class="scoreboard-empty">No combat data yet.</div>';
+    }
+
+    if (sessionEl) {
+      const localId = summaryWorld.localPlayerId ?? this._playerId(world.localPlayer);
+      const matchPlayer = this._findPlayerById(summaryWorld, localId);
+      const sessionStats = world.localPlayer?.sessionStats ?? null;
+      sessionEl.innerHTML = sessionStats
+        ? `
+          <div class="panel-title ${world.localPlayer?.faction ?? 'blue'}">SESSION TOTALS</div>
+          <div class="session-grid">
+            <span>MATCHES</span><b>${world.sessionMatches ?? 0}</b>
+            <span>MATCH KDA</span><b>${matchPlayer?.stats?.kills ?? 0}/${matchPlayer?.stats?.deaths ?? 0}/${matchPlayer?.stats?.assists ?? 0}</b>
+            <span>COLLECTED</span><b>${sessionStats.crystalsCollected ?? 0}</b>
+            <span>DELIVERED</span><b>${sessionStats.crystalsDelivered ?? 0}</b>
+            <span>DELIVERY PTS</span><b>${Math.round(sessionStats.deliveryScore ?? 0)}</b>
+            <span>CAPTURES</span><b>${sessionStats.baseCaptures ?? 0}</b>
+            <span>CHAOS TIME</span><b>${Math.round(sessionStats.chaosActivity ?? 0)}s</b>
+            <span>ABILITIES</span><b>${sessionStats.abilitiesUsed ?? 0}</b>
+          </div>
+        `
+        : '<div class="panel-title">SESSION TOTALS</div><div class="scoreboard-empty">Deploy an agent to begin tracking.</div>';
     }
 
     const replayPanel = document.getElementById('replay-panel');
@@ -656,6 +725,51 @@ export class HUD {
     const mins = Math.floor(total / 60);
     const secs = Math.floor(total % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _playerId(player) {
+    return player ? `${player.faction}:${player.index}` : null;
+  }
+
+  _findPlayerById(world, id) {
+    if (!id) return null;
+    return world.players?.find(player => `${player.faction}:${player.index}` === id) ?? null;
+  }
+
+  _getFactionRanking(world) {
+    return ['blue', 'green', 'red']
+      .map(faction => ({
+        faction,
+        name: FACTION_NAMES[faction],
+        score: world.scores?.[faction] ?? 0,
+        stats: world.stats?.[faction] ?? {},
+      }))
+      .sort((a, b) => (
+        b.score - a.score ||
+        (b.stats.kills ?? 0) - (a.stats.kills ?? 0) ||
+        (b.stats.crystals ?? 0) - (a.stats.crystals ?? 0)
+      ));
+  }
+
+  _getPlayerRanking(world) {
+    return (world.players ?? [])
+      .map(player => {
+        const stats = player.stats ?? {};
+        const mvpScore = (stats.kills ?? 0) * 6 +
+          (stats.assists ?? 0) * 3 +
+          (stats.deliveryScore ?? 0) +
+          (stats.crystalsDelivered ?? 0) * 2 +
+          (stats.baseCaptures ?? 0) * 12 +
+          (stats.chaosActivity ?? 0) * 0.2 +
+          (stats.abilitiesUsed ?? 0) -
+          (stats.deaths ?? 0) * 4;
+        return { player, stats, mvpScore };
+      })
+      .sort((a, b) => (
+        b.mvpScore - a.mvpScore ||
+        (b.stats.kills ?? 0) - (a.stats.kills ?? 0) ||
+        (b.stats.deliveryScore ?? 0) - (a.stats.deliveryScore ?? 0)
+      ));
   }
 
   _updateSpectator(world) {

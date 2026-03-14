@@ -758,45 +758,6 @@ export class Renderer {
       ctx.restore();
     }
 
-      ctx.save();
-      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 10]);
-      ctx.beginPath();
-      ctx.moveTo(local.x, local.y);
-      ctx.lineTo(target.x, target.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.translate(arrowX, arrowY);
-      ctx.rotate(Math.atan2(dy, dx));
-      ctx.fillStyle = withAlpha(targetColor, 0.9);
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = targetColor;
-      ctx.beginPath();
-      ctx.moveTo(14, 0);
-      ctx.lineTo(-6, -8);
-      ctx.lineTo(-2, 0);
-      ctx.lineTo(-6, 8);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      ctx.save();
-      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
-      ctx.lineWidth = 2;
-      ctx.shadowBlur = 16;
-      ctx.shadowColor = targetColor;
-      ctx.beginPath();
-      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = withAlpha(targetColor, 0.95);
-      ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
-      ctx.restore();
-    }
-
     const spectated = world.spectatorTarget;
     if (!world.spectatorMode || !spectated?.alive) return;
 

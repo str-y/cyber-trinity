@@ -343,6 +343,9 @@ export class Player {
     if (jobId === 'scout' || jobId === 'healer') this.role = 'collector';
     else if (index === 4) this.role = 'defender';
     else this.role = 'fighter';
+
+    this.stats = createPlayerStats();
+    this.sessionStats = createPlayerStats();
   }
 
   update(dt, world) {
@@ -391,7 +394,7 @@ export class Player {
             jewel.delivered = true;
           }
           world.scores[this.faction] += totalScore;
-          world.stats[this.faction].crystals += this.carrying.length;
+          world._recordCrystalDelivery(this, this.carrying.length, totalScore);
           world.events.push({
             text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
             faction: this.faction,
@@ -430,6 +433,7 @@ export class Player {
         this.target.pickupLockOwner = null;
         this.target.pickupLockTimer = 0;
         this.carrying.push(this.target);
+        world._recordCrystalPickup(this);
         world.audio?.playCrystalPickup(this.target.tier);
         // Look for next jewel or deliver if at capacity
         if (this.carrying.length >= MAX_CARRY) {
@@ -453,7 +457,7 @@ export class Player {
         const baseDmg = this.job === 'warrior' ? 22 : this.job === 'mage' ? 18 : this.job === 'scout' ? 15 : 10;
         const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
         const dmg = baseDmg * dmgMult;
-        world._registerDamage(enemy, this.faction);
+        world._registerDamage(enemy, this);
         this.markCombat(world.elapsed);
         enemy.markCombat(world.elapsed);
         enemy.health -= dmg;
@@ -741,6 +745,7 @@ export class Player {
       this.passiveState.overclockStacks = 0;
     }
     this.markCombat(world.elapsed ?? 0);
+    world._recordAbilityUse(this);
 
     const dx = enemy.x - this.x;
     const dy = enemy.y - this.y;
@@ -773,10 +778,34 @@ export class Player {
     return proj;
   }
 
+  resetMatchStats() {
+    this.stats = createPlayerStats();
+  }
+
+  recordStat(key, amount = 1) {
+    if (!(key in this.stats) || !(key in this.sessionStats)) return;
+    this.stats[key] += amount;
+    this.sessionStats[key] += amount;
+  }
+
   markCombat(timestamp) {
     this.lastCombatTime = timestamp;
     if (this.passiveState) this.passiveState.bioRegenActive = false;
   }
+}
+
+function createPlayerStats() {
+  return {
+    kills: 0,
+    deaths: 0,
+    assists: 0,
+    crystalsCollected: 0,
+    crystalsDelivered: 0,
+    deliveryScore: 0,
+    baseCaptures: 0,
+    chaosActivity: 0,
+    abilitiesUsed: 0,
+  };
 }
 
 // ── MemoryCrystal (Jewel) ─────────────────────────────────────────────────────
