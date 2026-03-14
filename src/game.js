@@ -308,10 +308,74 @@ const FEATURE_CONTRACTS = [
 
 // ── AI difficulty parameters ───────────────────────────────────────────────
 const AI_DIFFICULTY = {
-  easy:   { speedMult: 0.70, aggroMult: 0.60, abilityMult: 0.40 },
-  normal: { speedMult: 1.00, aggroMult: 1.00, abilityMult: 1.00 },
-  hard:   { speedMult: 1.20, aggroMult: 1.30, abilityMult: 1.60 },
-  expert: { speedMult: 1.40, aggroMult: 1.60, abilityMult: 2.20 },
+  easy: {
+    speedMult: 0.70,
+    aggroMult: 0.60,
+    abilityMult: 0.40,
+    reactionTime: 0.42,
+    steering: 0.08,
+    crystalFocus: 0.70,
+    targetCommit: 0.55,
+    hateFocus: 0.20,
+    allianceFocus: 0.55,
+    deliveryThreshold: 2,
+    deliverySearchRadius: 140,
+    abilityRangeMult: 0.92,
+    aimLead: 0,
+    aimJitter: 18,
+    interceptPlayer: false,
+  },
+  normal: {
+    speedMult: 1.00,
+    aggroMult: 1.00,
+    abilityMult: 1.00,
+    reactionTime: 0.24,
+    steering: 0.12,
+    crystalFocus: 0.90,
+    targetCommit: 0.85,
+    hateFocus: 0.60,
+    allianceFocus: 0.90,
+    deliveryThreshold: 1,
+    deliverySearchRadius: 0,
+    abilityRangeMult: 1,
+    aimLead: 0.08,
+    aimJitter: 8,
+    interceptPlayer: false,
+  },
+  hard: {
+    speedMult: 1.20,
+    aggroMult: 1.30,
+    abilityMult: 1.60,
+    reactionTime: 0.18,
+    steering: 0.15,
+    crystalFocus: 0.98,
+    targetCommit: 0.95,
+    hateFocus: 0.82,
+    allianceFocus: 0.98,
+    deliveryThreshold: 1,
+    deliverySearchRadius: 0,
+    abilityRangeMult: 1.12,
+    aimLead: 0.18,
+    aimJitter: 3,
+    interceptPlayer: false,
+  },
+  expert: {
+    speedMult: 1.40,
+    aggroMult: 1.60,
+    abilityMult: 2.20,
+    reactionTime: 0.12,
+    steering: 0.18,
+    crystalFocus: 1,
+    targetCommit: 1,
+    hateFocus: 1,
+    allianceFocus: 1,
+    deliveryThreshold: 1,
+    deliverySearchRadius: 0,
+    abilityRangeMult: 1.2,
+    aimLead: 0.32,
+    aimJitter: 0,
+    interceptPlayer: true,
+  },
 };
 
 // ── Starting crystal counts ────────────────────────────────────────────────
@@ -333,19 +397,20 @@ export class Game {
     this.modeRules = getModeRules(gameMode);
 
     // ── Lobby config (all settings from the pre-match lobby) ───────────────
-    this.config = {
+    const aiDifficulty = Object.freeze({
+      blue:  options.aiDifficulty?.blue  ?? 'normal',
+      green: options.aiDifficulty?.green ?? 'normal',
+      red:   options.aiDifficulty?.red   ?? 'normal',
+    });
+    this.config = Object.freeze({
       matchDuration:      options.matchDuration      ?? this.modeRules.matchDuration,
       winScore:           options.winScore           ?? this.modeRules.winScore,
       chaosEnabled:       options.chaosEnabled       ?? true,
       chaosInterval:      options.chaosInterval      ?? CHAOS_EVENT_INTERVAL,
       gameMode,
       startingCrystals:   options.startingCrystals   ?? 'normal',
-      aiDifficulty: {
-        blue:  options.aiDifficulty?.blue  ?? 'normal',
-        green: options.aiDifficulty?.green ?? 'normal',
-        red:   options.aiDifficulty?.red   ?? 'normal',
-      },
-    };
+      aiDifficulty,
+    });
     this.damageNumbers = [];
     this.trainingMessage = '';
     this.tutorial = null;
@@ -555,6 +620,9 @@ export class Game {
         // The human player is the first member (i === 0) of their chosen faction.
         const isHumanPlayer = faction === this.playerFaction && i === 0;
         if (!isHumanPlayer) {
+          p.aiDifficulty = this.config.aiDifficulty[faction];
+          p.aiProfile = diff;
+          p.aiDecisionTimer = Math.random() * diff.reactionTime;
           p.speed                = Math.round(p.speed * diff.speedMult);
           p.aggro                = Math.min(1, p.aggro * diff.aggroMult);
           p.abilityDifficultyMult = diff.abilityMult;  // per-frame ability chance scalar

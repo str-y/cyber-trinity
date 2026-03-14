@@ -327,6 +327,10 @@ export class Player {
 
     this.aiDisabled = !!options.aiDisabled;
     this.isDummy = !!options.isDummy;
+    this.aiDifficulty = options.aiDifficulty ?? 'normal';
+    this.aiProfile = options.aiProfile ?? null;
+    this.aiDecisionTimer = 0;
+    this.abilityDifficultyMult = 1;
     this.setJob(jobId, { refillEnergy: true, resetCooldowns: true, preserveHealthRatio: false });
   }
 
@@ -428,9 +432,19 @@ export class Player {
 
   _ai(dt, world) {
     const homeBase = world.bases[this.faction];
+    const aiProfile = this.aiProfile ?? {};
 
     // Carrying jewels → deliver to nearest owned TriLock (or home base)
     if (this.carrying.length > 0) {
+      const shouldDelayDelivery = this.carrying.length < (aiProfile.deliveryThreshold ?? 1);
+      if (shouldDelayDelivery) {
+        const nextCrystal = world._nearestFreeCrystal(this.x, this.y, this);
+        if (nextCrystal && dist(this.x, this.y, nextCrystal.x, nextCrystal.y) <= (aiProfile.deliverySearchRadius ?? 0)) {
+          this.state = 'carry';
+          this.target = nextCrystal;
+          return;
+        }
+      }
       const deliveryTarget = world._nearestOwnedBase(this.x, this.y, this.faction);
       if (deliveryTarget) {
         this.state  = 'carry';
@@ -457,6 +471,7 @@ export class Player {
     }
 
     this.attackTimer -= dt;
+    this.aiDecisionTimer = Math.max(0, (this.aiDecisionTimer ?? 0) - dt);
 
     const rallying = this._applyRallyCommand(world);
     const pinning = !rallying && this._applyPinCommand(world);
@@ -467,11 +482,20 @@ export class Player {
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    if (!rallying && !pinning && !guardianing) {
+    const targetReached = this.target && dist(this.x, this.y, this.target.x, this.target.y) < 20;
+    const shouldRethink = !this.target ||
+      this.aiDecisionTimer <= 0 ||
+      (this.state === 'attack' && (!this.target.alive || this.target.faction === this.faction)) ||
+      (this.state === 'carry' && this.target instanceof MemoryCrystal &&
+        (this.target.delivered || (this.target.carrier && this.target.carrier !== this))) ||
+      ((this.state === 'roam' || this.state === 'defend' || this.state === 'rally') && targetReached);
+
+    if (!rallying && !pinning && !guardianing && shouldRethink) {
+      this.aiDecisionTimer = aiProfile.reactionTime ?? 0.24;
       switch (this.role) {
-        case 'collector': this._aiCollector(world, homeBase); break;
-        case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
-        case 'defender':  this._aiDefender(world, homeBase);  break;
+        case 'collector': this._aiCollector(world, homeBase, aiProfile); break;
+        case 'fighter':   this._aiFighter(world, homeBase, leadFaction, aiProfile); break;
+        case 'defender':  this._aiDefender(world, homeBase); break;
       }
     }
 
@@ -524,10 +548,10 @@ export class Player {
   }
 
   // Collector: jewel collection specialist (low aggro)
-  _aiCollector(world, base) {
+  _aiCollector(world, base, aiProfile = {}) {
     if (this.state === 'roam' || !this.target) {
       const crystal = world._nearestFreeCrystal(this.x, this.y, this);
-      if (crystal && Math.random() < 0.90) {
+      if (crystal && Math.random() < (aiProfile.crystalFocus ?? 0.90)) {
         this.target = crystal;
         this.state  = 'carry';
       } else if (Math.random() < this.aggro * 0.08) {
@@ -646,17 +670,25 @@ export class Player {
   }
 
   // Fighter: enemy elimination specialist — biased toward leading team (hate control)
-  _aiFighter(world, base, leadFaction) {
+  _aiFighter(world, base, leadFaction, aiProfile = {}) {
     if (this.state === 'roam' || !this.target) {
       let enemy;
       const alliance = world.alliance;
+      const localPlayer = world.localPlayer;
+      const canInterceptPlayer = aiProfile.interceptPlayer &&
+        localPlayer?.alive &&
+        localPlayer.faction !== this.faction &&
+        !(alliance && alliance.members.includes(this.faction) && alliance.members.includes(localPlayer.faction));
 
-      if (alliance && alliance.members.includes(this.faction)) {
+      if (canInterceptPlayer &&
+          (localPlayer.carrying.length > 0 || dist(this.x, this.y, localPlayer.x, localPlayer.y) < 260)) {
+        enemy = localPlayer;
+      } else if (alliance && alliance.members.includes(this.faction)) {
         // In alliance: 90% chance to specifically target the alliance target faction
-        if (Math.random() < 0.90) {
+        if (Math.random() < (aiProfile.allianceFocus ?? 0.90)) {
           enemy = world._nearestEnemyOfFaction(this.x, this.y, alliance.target);
         }
-      } else if (leadFaction && leadFaction !== this.faction && Math.random() < 0.60) {
+      } else if (leadFaction && leadFaction !== this.faction && Math.random() < (aiProfile.hateFocus ?? 0.60)) {
         // Hate control: 60% chance to specifically target leading faction if different from own
         enemy = world._nearestEnemyOfFaction(this.x, this.y, leadFaction);
       }
@@ -664,7 +696,7 @@ export class Player {
         enemy = world._nearestEnemy(this.x, this.y, this.faction);
       }
 
-      if (enemy && Math.random() < 0.85) {
+      if (enemy && Math.random() < (aiProfile.targetCommit ?? 0.85)) {
         this.target = enemy;
         this.state  = 'attack';
       } else if (Math.random() < this.aggro * 0.50) {
@@ -732,8 +764,14 @@ export class Player {
 
   _move(dt, world) {
     if (!this.target) return;
-    const tx = this.target.x;
-    const ty = this.target.y;
+    let tx = this.target.x;
+    let ty = this.target.y;
+    if (!this.isPlayerControlled && this.state === 'attack' && this.aiProfile?.aimLead &&
+        Number.isFinite(this.target?.vx) && Number.isFinite(this.target?.vy)) {
+      const lead = this.aiProfile.aimLead * (this.target.isPlayerControlled ? 1.5 : 1);
+      tx += this.target.vx * lead;
+      ty += this.target.vy * lead;
+    }
     const dx = tx - this.x, dy = ty - this.y;
     const d  = Math.sqrt(dx * dx + dy * dy);
     if (d < 2) return;
@@ -742,8 +780,9 @@ export class Player {
       (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1);
     const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
-    this.vx = lerp(this.vx, nx * effSpeed, 0.12);
-    this.vy = lerp(this.vy, ny * effSpeed, 0.12);
+    const steering = this.isPlayerControlled ? 0.12 : (this.aiProfile?.steering ?? 0.12);
+    this.vx = lerp(this.vx, nx * effSpeed, steering);
+    this.vy = lerp(this.vy, ny * effSpeed, steering);
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
@@ -781,8 +820,10 @@ export class Player {
   tryAbility(world) {
     if (this.cooldown > 0 || this.energy < this.abilityCost || !this.alive) return null;
 
+    const aiProfile = this.isPlayerControlled ? null : (this.aiProfile ?? {});
     const enemy = world._nearestEnemy(this.x, this.y, this.faction);
-    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
+    const abilityRange = ABILITY_RANGE * (aiProfile?.abilityRangeMult ?? 1);
+    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > abilityRange) return null;
 
     this.energy  -= this.abilityCost;
     const cooldownReduction = (this.passive?.id === 'overclock')
@@ -799,8 +840,19 @@ export class Player {
     this.markCombat(world.elapsed ?? 0);
     world._recordAbilityUse(this);
 
-    const dx = enemy.x - this.x;
-    const dy = enemy.y - this.y;
+    let aimX = enemy.x;
+    let aimY = enemy.y;
+    if (aiProfile?.aimLead && Number.isFinite(enemy.vx) && Number.isFinite(enemy.vy)) {
+      const lead = aiProfile.aimLead * (enemy.isPlayerControlled ? 1.5 : 1);
+      aimX += enemy.vx * lead;
+      aimY += enemy.vy * lead;
+    }
+    if (aiProfile?.aimJitter) {
+      aimX += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
+      aimY += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
+    }
+    const dx = aimX - this.x;
+    const dy = aimY - this.y;
     const [nx, ny] = normalise(dx, dy);
 
     const skill = this.jobDef.skills[0];
