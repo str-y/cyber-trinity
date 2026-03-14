@@ -23,6 +23,7 @@ function withAlpha(hex, a) {
 
 const RING_PARTICLE_ALPHA = 0.95;
 const CAMERA_ZOOM_THRESHOLD = 1.001;
+const ZONE_COLLAPSE_NOISE_ANGLE_OFFSET = 0.61;
 
 // ── Renderer class ────────────────────────────────────────────────────────────
 
@@ -122,6 +123,7 @@ export class Renderer {
 
     // ── Chaos event effects ────────────────────────────────────────────
     this._drawChaosEvent(world);
+    this._drawZoneCollapse(world);
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
@@ -1053,6 +1055,75 @@ export class Renderer {
     }
   }
 
+  _drawZoneCollapse(world) {
+    const zone = world.zoneCollapse;
+    if (!zone?.active) return;
+
+    const ctx = this.ctx;
+    const t = this.time;
+    const pulse = 0.45 + 0.3 * Math.sin(t * 6);
+    const radius = zone.currentRadius;
+    const cx = zone.centerX;
+    const cy = zone.centerY;
+
+    ctx.save();
+    ctx.fillStyle = `rgba(255,68,68,${0.08 + pulse * 0.06})`;
+    ctx.beginPath();
+    ctx.rect(0, 0, world.width, world.height);
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
+    ctx.fill('evenodd');
+
+    ctx.strokeStyle = `rgba(255,120,120,${0.55 + pulse * 0.25})`;
+    ctx.lineWidth = 4;
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = '#ff6a6a';
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.lineWidth = 1.4;
+    ctx.shadowBlur = 0;
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2 + t * 0.7;
+      const arcX = cx + Math.cos(angle) * radius;
+      const arcY = cy + Math.sin(angle) * radius;
+      const tangentAngle = angle + Math.PI / 2;
+      const length = 12 + 4 * Math.sin(t * 10 + i);
+      ctx.strokeStyle = i % 2 === 0
+        ? `rgba(255,220,220,${0.42 + pulse * 0.2})`
+        : `rgba(120,220,255,${0.28 + pulse * 0.16})`;
+      ctx.beginPath();
+      ctx.moveTo(
+        arcX - Math.cos(tangentAngle) * length,
+        arcY - Math.sin(tangentAngle) * length,
+      );
+      ctx.lineTo(
+        arcX + Math.cos(tangentAngle) * length,
+        arcY + Math.sin(tangentAngle) * length,
+      );
+      ctx.stroke();
+    }
+
+    if (!this.lowQuality) {
+      ctx.globalAlpha = 0.3 + pulse * 0.18;
+      for (let i = 0; i < 28; i++) {
+        const angle = (i * ZONE_COLLAPSE_NOISE_ANGLE_OFFSET) + t * 0.9;
+        const noiseRadius = radius + 16 + (i % 5) * 18;
+        const px = cx + Math.cos(angle) * noiseRadius;
+        const py = cy + Math.sin(angle) * noiseRadius;
+        ctx.fillStyle = i % 3 === 0 ? '#ffd3d3' : '#ff7a7a';
+        ctx.fillRect(px, py, 3 + (i % 2), 1.5 + (i % 3));
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.fillStyle = `rgba(255,210,210,${0.72 + pulse * 0.2})`;
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ZONE COLLAPSE', cx, cy - radius - 12);
+    ctx.restore();
+  }
+
   _drawFeaturePulse(world) {
     const timer = world.nextFeature?.visualTimer ?? 0;
     if (timer <= 0) return;
@@ -1440,11 +1511,20 @@ export class Renderer {
         ctx.fillRect(px, py, size * 2, size);
       }
       ctx.restore();
-    } else if (filters.chaosZones && world.chaosEvent) {
+    } else if (filters.chaosZones && (world.chaosEvent || world.zoneCollapse?.active)) {
       const event = world.chaosEvent;
       const pulse = 0.15 + 0.18 * Math.sin(this.time * 8);
       ctx.save();
-      if (event.type === 'emp_storm') {
+      if (world.zoneCollapse?.active) {
+        const zone = world.zoneCollapse;
+        ctx.strokeStyle = withAlpha('#ff6666', 0.45 + pulse);
+        ctx.fillStyle = withAlpha('#ff6666', 0.08 + pulse * 0.16);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mx(zone.centerX), my(zone.centerY), (zone.currentRadius / wW) * mapW, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (event.type === 'emp_storm') {
         ctx.strokeStyle = withAlpha(event.color, 0.5 + pulse);
         ctx.fillStyle = withAlpha(event.color, pulse * 0.45);
         ctx.lineWidth = 1.5;

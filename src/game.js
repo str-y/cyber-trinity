@@ -34,6 +34,14 @@ const KILL_SCORE = 5;
 const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
+const ZONE_COLLAPSE_START_TIME = 120;
+const ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC = 0.05;
+const ZONE_COLLAPSE_START_RADIUS_RATIO = 0.46;
+const ZONE_COLLAPSE_MIN_RADIUS_RATIO = 0.18;
+const ZONE_COLLAPSE_FX_INTERVAL = 0.22;
+const ZONE_COLLAPSE_MAX_SCORE_GAP = 40;
+const ZONE_COLLAPSE_BASE_EXPONENT = 1.3;
+const ZONE_COLLAPSE_GAP_EXPONENT_REDUCTION = 0.5;
 const QUICK_MODE_SCALE = 0.6;
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
@@ -454,6 +462,7 @@ export class Game {
     this.victoryTimer = 0;
     this.elapsed = 0;
     this.matchTimer = this.config.matchDuration;   // countdown (seconds)
+    this.zoneCollapse = this._createZoneCollapseState();
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = createFeatureContracts(this.modeRules).map(c => ({
       ...c,
@@ -562,6 +571,31 @@ export class Game {
     }
   }
 
+  _createZoneCollapseState(previous = {}) {
+    const minDimension = Math.min(this.width || 0, this.height || 0);
+    const startRadius = Math.max(140, minDimension * ZONE_COLLAPSE_START_RADIUS_RATIO);
+    const minRadius = Math.max(90, minDimension * ZONE_COLLAPSE_MIN_RADIUS_RATIO);
+    const progress = Math.max(0, Math.min(1, previous.progress ?? 0));
+    return {
+      active: previous.active ?? false,
+      progress,
+      scoreGap: previous.scoreGap ?? 0,
+      speedMultiplier: previous.speedMultiplier ?? 0.8,
+      centerX: this.width * 0.5,
+      centerY: this.height * 0.5,
+      startRadius,
+      minRadius,
+      currentRadius: startRadius - (startRadius - minRadius) * progress,
+      damagePerSecond: previous.damagePerSecond ?? ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC,
+    };
+  }
+
+  _resetZoneCollapse(preserveProgress = false) {
+    this.zoneCollapse = this._createZoneCollapseState(
+      preserveProgress ? this.zoneCollapse : {},
+    );
+  }
+
   // ── Feature contract accessor (used by HUD and renderer) ─────────────────
   get nextFeature() {
     return this.featureContracts[this.featureIndex] ?? null;
@@ -583,6 +617,7 @@ export class Game {
     this.width  = window.innerWidth;
     this.height = window.innerHeight;
     this.renderer.resize(this.width, this.height);
+    this._resetZoneCollapse(true);
     if (!this.camera.x && !this.camera.y) this.resetReplayCamera();
 
     // Reposition bases on resize
@@ -1391,6 +1426,8 @@ export class Game {
       }
     }
 
+    this._updateZoneCollapse(dt);
+
     // Ability firing (AI triggers periodically)
     for (const player of this.players) {
       if (player.isPlayerControlled && !this.spectatorMode) {
@@ -1515,6 +1552,61 @@ export class Game {
     this._updateModeScenario(dt);
     this._checkMatchEnd();
     this.replay.recordFrame();
+  }
+
+  _updateZoneCollapse(dt) {
+    if (!this.zoneCollapse || this._isSandboxMode() || !Number.isFinite(this.matchTimer)) return;
+
+    const zone = this.zoneCollapse;
+    if (!zone.active && this.matchTimer <= ZONE_COLLAPSE_START_TIME) {
+      zone.active = true;
+      this.events.push({
+        text: '⚠️ ZONE COLLAPSE — outer sectors destabilising, move toward the centre',
+        faction: 'red',
+        ttl: 4,
+      });
+    }
+    if (!zone.active) return;
+
+    const standings = Object.values(this.scores).sort((a, b) => b - a);
+    zone.scoreGap = Math.max(0, (standings[0] ?? 0) - (standings[1] ?? 0));
+    const gapRatio = Math.min(1, zone.scoreGap / ZONE_COLLAPSE_MAX_SCORE_GAP);
+    zone.speedMultiplier = 0.8 + gapRatio * 0.7;
+    const elapsedRatio = Math.max(0, Math.min(1,
+      (ZONE_COLLAPSE_START_TIME - Math.max(this.matchTimer, 0)) / ZONE_COLLAPSE_START_TIME,
+    ));
+    const progressExponent = ZONE_COLLAPSE_BASE_EXPONENT - gapRatio * ZONE_COLLAPSE_GAP_EXPONENT_REDUCTION;
+    zone.progress = Math.pow(elapsedRatio, progressExponent);
+    zone.currentRadius = zone.startRadius - (zone.startRadius - zone.minRadius) * zone.progress;
+
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      const distance = Math.hypot(player.x - zone.centerX, player.y - zone.centerY);
+      if (distance <= zone.currentRadius) {
+        player.zoneFxTimer = 0;
+        continue;
+      }
+
+      player.markCombat(this.elapsed);
+      player.health -= player.maxHealth * zone.damagePerSecond * dt;
+      player.zoneFxTimer = (player.zoneFxTimer ?? 0) - dt;
+      if (player.zoneFxTimer <= 0) {
+        this.sparks.push(...Particle.burst(player.x, player.y, '#ff6666', 3, {
+          speedMin: 20,
+          speedMax: 90,
+          lifeMin: 0.16,
+          lifeMax: 0.38,
+          sizeMin: 1.4,
+          sizeMax: 2.8,
+          drag: 3.4,
+        }));
+        player.zoneFxTimer = ZONE_COLLAPSE_FX_INTERVAL;
+      }
+
+      if (player.health <= 0) {
+        this._recordElimination(player, null, 'was consumed by', 'ZONE COLLAPSE');
+      }
+    }
   }
 
   _updateModeScenario(dt) {
@@ -2050,7 +2142,7 @@ export class Game {
     this.damageLedger.get(target).set(attackerFaction, this.elapsed);
   }
 
-  _recordElimination(victim, killerFaction, reason = 'eliminated') {
+  _recordElimination(victim, killerFaction, reason = 'eliminated', neutralLabel = 'NEXUS GUARDIAN') {
     const killerPlayer = typeof killerFaction === 'string' ? null : killerFaction;
     const killerSide = killerPlayer?.faction ?? killerFaction;
     victim.alive = false;
@@ -2086,7 +2178,7 @@ export class Game {
       });
     } else {
       this.events.push({
-        text: `☠️ NEXUS GUARDIAN eliminated ${victim.faction.toUpperCase()}`,
+        text: `☠️ ${neutralLabel} ${reason} ${victim.faction.toUpperCase()}`,
         faction: victim.faction,
         ttl: 3,
       });
@@ -2178,6 +2270,7 @@ export class Game {
     this.victoryTimer = 0;
     this.elapsed = 0;
     this.matchTimer = this.config.matchDuration;
+    this._resetZoneCollapse();
     this.events = [];
     this.projectiles = [];
     this.sparks = [];
@@ -2727,6 +2820,18 @@ export class Game {
     return {
       elapsed: round(this.elapsed),
       matchTimer: round(this.matchTimer),
+      zoneCollapse: this.zoneCollapse ? {
+        active: this.zoneCollapse.active,
+        progress: round(this.zoneCollapse.progress ?? 0, 4),
+        scoreGap: this.zoneCollapse.scoreGap ?? 0,
+        speedMultiplier: round(this.zoneCollapse.speedMultiplier ?? 0, 3),
+        centerX: round(this.zoneCollapse.centerX ?? 0),
+        centerY: round(this.zoneCollapse.centerY ?? 0),
+        startRadius: round(this.zoneCollapse.startRadius ?? 0),
+        minRadius: round(this.zoneCollapse.minRadius ?? 0),
+        currentRadius: round(this.zoneCollapse.currentRadius ?? 0),
+        damagePerSecond: round(this.zoneCollapse.damagePerSecond ?? 0, 4),
+      } : null,
       matchEnded: this.matchEnded,
       winnerFaction: this.winnerFaction,
       victoryTimer: round(this.victoryTimer),
@@ -2858,6 +2963,7 @@ export class Game {
     if (!frame) return;
     this.elapsed = frame.elapsed ?? 0;
     this.matchTimer = frame.matchTimer ?? MATCH_DURATION;
+    this.zoneCollapse = frame.zoneCollapse ? { ...frame.zoneCollapse } : this._createZoneCollapseState();
     this.matchEnded = !!frame.matchEnded;
     this.winnerFaction = frame.winnerFaction ?? null;
     this.victoryTimer = frame.victoryTimer ?? 0;

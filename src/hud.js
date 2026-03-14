@@ -278,6 +278,16 @@ export class HUD {
     jobSwitcher.id = 'mode-job-switcher';
     hud.appendChild(jobSwitcher);
     this._jobSwitcherEl = jobSwitcher;
+
+    const zoneCollapseBanner = document.createElement('div');
+    zoneCollapseBanner.id = 'zone-collapse-banner';
+    zoneCollapseBanner.innerHTML = `
+      <div class="panel-title red">SAFE ZONE ALERT</div>
+      <div class="zone-collapse-line" id="zone-collapse-state">OUTER SECTORS STABLE</div>
+      <div class="zone-collapse-detail" id="zone-collapse-detail">—</div>
+    `;
+    hud.appendChild(zoneCollapseBanner);
+    this._zoneCollapseEl = zoneCollapseBanner;
   }
 
   _barRow(icon, label, id, numText, pct, type) {
@@ -378,6 +388,7 @@ export class HUD {
       this._updatePassive(local);
     }
 
+    this._updateZoneCollapse(world, local);
     this._updateSpectator(world);
 
     // Jewel counter
@@ -558,6 +569,41 @@ export class HUD {
     const mins = Math.floor(total / 60);
     const secs = total % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _updateZoneCollapse(world, local) {
+    if (!this._zoneCollapseEl) return;
+    const zone = world.zoneCollapse;
+    if (!zone?.active || !Number.isFinite(world.matchTimer ?? 0) || world.spectatorMode) {
+      this._zoneCollapseEl.classList.remove('active', 'danger');
+      this._zoneCollapseEl.style.display = 'none';
+      return;
+    }
+
+    this._zoneCollapseEl.style.display = 'flex';
+    this._zoneCollapseEl.classList.add('active');
+
+    const stateEl = document.getElementById('zone-collapse-state');
+    const detailEl = document.getElementById('zone-collapse-detail');
+    const distance = local
+      ? Math.hypot(local.x - zone.centerX, local.y - zone.centerY)
+      : 0;
+    const outside = !!local && distance > zone.currentRadius;
+    this._zoneCollapseEl.classList.toggle('danger', outside);
+
+    if (stateEl) {
+      stateEl.textContent = outside
+        ? '⚠️ RETURN TO THE SAFE ZONE'
+        : `SAFE ZONE SHRINKING — ${Math.round(zone.progress * 100)}%`;
+    }
+    if (detailEl) {
+      const edgeDistance = local
+        ? Math.max(0, Math.round(Math.abs(distance - zone.currentRadius)))
+        : 0;
+      detailEl.textContent = outside
+        ? `DMG ${Math.round(zone.damagePerSecond * 100)}% HP/s • ${edgeDistance}px TO SAFETY`
+        : `MATCH ${this._formatTimer(world.matchTimer)} • GAP ${zone.scoreGap} • HOLD THE CENTER`;
+    }
   }
 
   _updateGuardian(world) {
