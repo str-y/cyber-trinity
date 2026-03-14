@@ -16,7 +16,7 @@ export const DEFAULT_CONFIG = {
   winScore:           150,      // standard mode target; 2v2v2 mode forces 80
   chaosEnabled:       true,
   chaosInterval:      30,       // seconds  (30 / 60 / 90)
-  gameMode:           'standard',  // 'standard' (5v5v5) | 'quick' (2v2v2)
+  gameMode:           'standard',  // 'standard' | 'quick' | 'tutorial' | 'practice'
   startingCrystals:   'normal', // 'low' | 'normal' | 'high'
   aiDifficulty: {
     blue:  'normal',
@@ -43,6 +43,24 @@ const MODE_PRESETS = {
     baseMarginRatio: 0.22,
     trilockRingRatio: 0.11,
     label: '2v2v2  QUICK · 3 MIN / 80 PTS',
+  },
+  tutorial: {
+    matchDuration: 300,
+    winScore: 0,
+    playersPerFaction: 1,
+    trilockCount: 1,
+    baseMarginRatio: 0.24,
+    trilockRingRatio: 0.12,
+    label: 'GUIDED TUTORIAL · LEARN CORE SYSTEMS',
+  },
+  practice: {
+    matchDuration: 300,
+    winScore: 0,
+    playersPerFaction: 1,
+    trilockCount: 1,
+    baseMarginRatio: 0.24,
+    trilockRingRatio: 0.12,
+    label: 'PRACTICE SANDBOX · FREE JOB SWITCHING',
   },
 };
 
@@ -229,6 +247,8 @@ function buildLobbyInner() {
           <div class="setting-options" data-setting="gameMode">
             <button class="opt-btn selected" data-value="standard">STANDARD 5v5v5</button>
             <button class="opt-btn" data-value="quick">QUICK 2v2v2</button>
+            <button class="opt-btn" data-value="tutorial">TUTORIAL</button>
+            <button class="opt-btn" data-value="practice">PRACTICE</button>
           </div>
         </div>
 
@@ -341,6 +361,10 @@ export function initLobby(els, onLaunch) {
     const preset = getModePreset(mode);
     config.matchDuration = preset.matchDuration;
     config.winScore = preset.winScore;
+    if (mode === 'tutorial' || mode === 'practice') {
+      config.chaosEnabled = false;
+      config.startingCrystals = 'low';
+    }
   }
 
   function refreshPreview() {
