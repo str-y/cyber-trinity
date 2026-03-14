@@ -326,6 +326,18 @@ export class Player {
 
     this.stats = createPlayerStats();
     this.sessionStats = createPlayerStats();
+    this.killStreak = 0;
+    this.comboCount = 0;
+    this.comboTimer = 0;
+    this.comboMultiplier = 1;
+    this.killStreakSpeedTimer = 0;
+    this.rampageTimer = 0;
+    this.instantCooldownReady = false;
+    this.momentumNotice = '';
+    this.momentumDetail = '';
+    this.momentumNoticeTimer = 0;
+    this.comboFlashTimer = 0;
+    this.lastComboAction = null;
 
     this.aiDisabled = !!options.aiDisabled;
     this.isDummy = !!options.isDummy;
@@ -459,10 +471,13 @@ export class Player {
             totalScore += world._applyDeliveryPassive(this, deliveryTarget, pts);
             jewel.delivered = true;
           }
-          world.scores[this.faction] += totalScore;
-          world._recordCrystalDelivery(this, this.carrying.length, totalScore);
+          const delivery = world._recordCrystalDelivery(this, this.carrying.length, totalScore);
+          world.scores[this.faction] += delivery.awardedScore;
+          const comboLabel = delivery.combo.active && world._formatComboMultiplier
+            ? ` • ${world._formatComboMultiplier(delivery.combo.multiplier)}`
+            : '';
           world.events.push({
-            text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
+            text: `${this.faction.toUpperCase()} delivered ${this.carrying.length} JEWEL${this.carrying.length > 1 ? 'S' : ''} (+${delivery.awardedScore}${comboLabel})`,
             faction: this.faction,
             ttl: 3,
           });
@@ -532,7 +547,8 @@ export class Player {
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
         this.attackTimer = 0.6;
         const baseDmg = this.job === 'warrior' ? 22 : this.job === 'mage' ? 18 : this.job === 'scout' ? 15 : 10;
-        const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
+        const dmgMult = (world.factionBuffs?.[this.faction]?.damageMult ?? 1) *
+          (world._getMomentumDamageMultiplier?.(this) ?? 1);
         const dmg = baseDmg * dmgMult;
         world._registerDamage(enemy, this);
         this.markCombat(world.elapsed);
@@ -781,7 +797,8 @@ export class Player {
     if (d < 2) return;
     const speedMult = (world.factionBuffs?.[this.faction]?.speedMult ?? 1) *
       (this.passiveState?.speedMult ?? 1) *
-      (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1);
+      (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1) *
+      (world._getMomentumSpeedMultiplier?.(this) ?? 1);
     const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
     const steering = this.isPlayerControlled ? 0.12 : (this.aiProfile?.steering ?? 0.12);
@@ -838,6 +855,7 @@ export class Player {
       : 0;
     const cooldownMult = world._getAbilityCooldownMultiplier?.() ?? 1;
     this.cooldown = Math.max(0, this.abilityMax * cooldownMult - cooldownReduction);
+    if (world._consumeInstantCooldownReset?.(this)) this.cooldown = 0;
     if (this.passive?.id === 'overclock' && this.passiveState) {
       this.passiveState.overclockStacks = 0;
     }
@@ -861,9 +879,10 @@ export class Player {
 
     const skill = this.jobDef.skills[0];
     let proj;
+    const damageMult = world._getMomentumDamageMultiplier?.(this) ?? 1;
     switch (skill.type) {
       case 'railshot': {
-        proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage);
+        proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage * damageMult);
         proj.owner = this;
         break;
       }
@@ -873,12 +892,12 @@ export class Player {
         break;
       }
       case 'powerdash': {
-        proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage);
+        proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage * damageMult);
         proj.owner = this;
         break;
       }
       default: {
-        proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage);
+        proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage * damageMult);
         proj.owner = this;
         break;
       }

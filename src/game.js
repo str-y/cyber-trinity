@@ -33,6 +33,19 @@ const PROJECTILE_HIT_TOLERANCE = 4;    // extra px added to collision radii
 const KILL_SCORE = 5;
 const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
+const KILLSTREAK_SPEED_THRESHOLD = 2;
+const KILLSTREAK_SPEED_MULT = 1.1;
+const KILLSTREAK_SPEED_DURATION = 5;
+const KILLSTREAK_COOLDOWN_RESET_THRESHOLD = 3;
+const KILLSTREAK_RAMPAGE_THRESHOLD = 5;
+const KILLSTREAK_RAMPAGE_MULT = 1.25;
+const KILLSTREAK_RAMPAGE_DURATION = 10;
+const COMBO_WINDOW = 10;
+const COMBO_MULT_STEP = 0.5;
+const COMBO_MAX_MULT = 3;
+const MOMENTUM_NOTICE_DURATION = 2.6;
+const MOMENTUM_FLASH_DURATION = 0.55;
+const MOMENTUM_CONSUMED_NOTICE_DURATION = 1.2;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const ZONE_COLLAPSE_START_TIME = 120;
 const ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC = 0.05;
@@ -1409,6 +1422,7 @@ export class Game {
         player.recordStat('chaosActivity', dt);
         this.stats[player.faction].chaosActivity += dt;
       }
+      this._updateMomentumTimers(player, dt);
 
       const buff = this.factionBuffs[player.faction];
       const guardianBlessing = this.guardianBlessings[player.faction];
@@ -1416,7 +1430,10 @@ export class Game {
         player.passiveState?.bioRegenActive ||
         player.passiveState?.nearbyAllyBonus ||
         player.passiveState?.overclockStacks > 0 ||
-        player.passiveState?.sprintActive;
+        player.passiveState?.sprintActive ||
+        (player.killStreakSpeedTimer ?? 0) > 0 ||
+        (player.rampageTimer ?? 0) > 0 ||
+        !!player.instantCooldownReady;
       if (player.alive && (buff || guardianBlessing || passiveAura)) {
         player.auraTimer -= dt;
         if (player.auraTimer <= 0) {
@@ -1832,7 +1849,8 @@ export class Game {
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
     const speedMult = (this.factionBuffs?.[player.faction]?.speedMult ?? 1) *
       (player.passiveState?.speedMult ?? 1) *
-      this._getGuardianBlessing(player.faction).speedMult;
+      this._getGuardianBlessing(player.faction).speedMult *
+      this._getMomentumSpeedMultiplier(player);
     const effSpeed = player.speed * speedMult;
     const prevX = player.x;
     const prevY = player.y;
@@ -1874,8 +1892,8 @@ export class Game {
             gravity: 12,
           }));
         }
-        this.scores[player.faction] += totalScore;
-        this._recordCrystalDelivery(player, deliveredCount, totalScore);
+        const delivery = this._recordCrystalDelivery(player, deliveredCount, totalScore);
+        this.scores[player.faction] += delivery.awardedScore;
         if (this._isTutorialMode()) this._tutorialMetrics.deliveryDone = true;
         this.sparks.push(...Particle.ring(deliveryBase.x, deliveryBase.y, FACTIONS[player.faction].color, BASE_RADIUS * 0.55, {
           life: 0.85,
@@ -1883,7 +1901,7 @@ export class Game {
           lineWidth: 4,
         }));
         this.events.push({
-          text: `${player.faction.toUpperCase()} PLAYER delivered ${player.carrying.length} JEWEL${player.carrying.length > 1 ? 'S' : ''} (+${totalScore})`,
+          text: `${player.faction.toUpperCase()} PLAYER delivered ${player.carrying.length} JEWEL${player.carrying.length > 1 ? 'S' : ''} (+${delivery.awardedScore}${delivery.combo.active ? ` • ${this._formatComboMultiplier(delivery.combo.multiplier)}` : ''})`,
           faction: player.faction,
           ttl: 3,
         });
@@ -2078,11 +2096,19 @@ export class Game {
   }
 
   _recordCrystalDelivery(player, deliveredCount, totalScore) {
-    if (!player || deliveredCount <= 0) return;
+    if (!player || deliveredCount <= 0) {
+      return {
+        awardedScore: totalScore,
+        combo: { count: 0, multiplier: 1, active: false },
+      };
+    }
+    const combo = this._registerComboAction(player, 'delivery');
+    const awardedScore = this._applyComboScore(totalScore, combo.multiplier);
     player.recordStat('crystalsDelivered', deliveredCount);
-    player.recordStat('deliveryScore', totalScore);
+    player.recordStat('deliveryScore', awardedScore);
     this.stats[player.faction].crystals += deliveredCount;
-    this.stats[player.faction].deliveryScore += totalScore;
+    this.stats[player.faction].deliveryScore += awardedScore;
+    return { awardedScore, combo };
   }
 
   _recordAbilityUse(player) {
@@ -2145,6 +2171,7 @@ export class Game {
   _recordElimination(victim, killerFaction, reason = 'eliminated', neutralLabel = 'NEXUS GUARDIAN') {
     const killerPlayer = typeof killerFaction === 'string' ? null : killerFaction;
     const killerSide = killerPlayer?.faction ?? killerFaction;
+    this._resetMomentum(victim);
     victim.alive = false;
     victim.respawnTimer = 5 * this._getRespawnTimeMultiplier(victim.faction);
     this.sparks.push(...this._spawnDeathEffect(victim));
@@ -2168,11 +2195,19 @@ export class Game {
     victim.recordStat('deaths');
     this.stats[victim.faction].deaths++;
     if (killerSide && this.stats[killerSide]) {
+      let killScore = KILL_SCORE;
+      let combo = { count: 0, multiplier: 1, active: false };
+      if (killerPlayer) {
+        killerPlayer.killStreak = (killerPlayer.killStreak ?? 0) + 1;
+        combo = this._registerComboAction(killerPlayer, 'kill');
+        killScore = this._applyComboScore(KILL_SCORE, combo.multiplier);
+        this._applyKillStreakRewards(killerPlayer);
+      }
       killerPlayer?.recordStat('kills');
       this.stats[killerSide].kills++;
-      this.scores[killerSide] += KILL_SCORE;
+      this.scores[killerSide] += killScore;
       this.events.push({
-        text: `${killerSide.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
+        text: `${killerSide.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${killScore}${combo.active ? ` • ${this._formatComboMultiplier(combo.multiplier)}` : ''})`,
         faction: killerSide,
         ttl: 3,
       });
@@ -2330,6 +2365,7 @@ export class Game {
       player.passiveState.overclockStacks = 0;
       player.passiveState.speedMult = 1;
       player.passiveState.sprintActive = false;
+      this._resetMomentum(player);
     }
 
     // Reset home bases
@@ -2437,6 +2473,148 @@ export class Game {
 
   _getRespawnTimeMultiplier(faction) {
     return this._getGuardianBlessing(faction).respawnTimeMult;
+  }
+
+  _getMomentumSpeedMultiplier(player) {
+    return (player?.killStreakSpeedTimer ?? 0) > 0 ? KILLSTREAK_SPEED_MULT : 1;
+  }
+
+  _getMomentumDamageMultiplier(player) {
+    return (player?.rampageTimer ?? 0) > 0 ? KILLSTREAK_RAMPAGE_MULT : 1;
+  }
+
+  _consumeInstantCooldownReset(player) {
+    if (!player?.instantCooldownReady) return false;
+    player.instantCooldownReady = false;
+    player.momentumDetail = '';
+    player.momentumNoticeTimer = Math.max(player.momentumNoticeTimer ?? 0, MOMENTUM_CONSUMED_NOTICE_DURATION);
+    return true;
+  }
+
+  _updateMomentumTimers(player, dt) {
+    if (!player) return;
+    if ((player.killStreakSpeedTimer ?? 0) > 0) {
+      player.killStreakSpeedTimer = Math.max(0, player.killStreakSpeedTimer - dt);
+    }
+    if ((player.rampageTimer ?? 0) > 0) {
+      player.rampageTimer = Math.max(0, player.rampageTimer - dt);
+    }
+    if ((player.comboTimer ?? 0) > 0) {
+      player.comboTimer = Math.max(0, player.comboTimer - dt);
+      if (player.comboTimer <= 0) {
+        player.comboCount = 0;
+        player.comboMultiplier = 1;
+        player.lastComboAction = null;
+      }
+    }
+    if ((player.momentumNoticeTimer ?? 0) > 0) {
+      player.momentumNoticeTimer = Math.max(0, player.momentumNoticeTimer - dt);
+      if (player.momentumNoticeTimer <= 0) {
+        player.momentumNotice = '';
+        if (!player.instantCooldownReady) player.momentumDetail = '';
+      }
+    }
+    if ((player.comboFlashTimer ?? 0) > 0) {
+      player.comboFlashTimer = Math.max(0, player.comboFlashTimer - dt);
+    }
+  }
+
+  _resetMomentum(player) {
+    if (!player) return;
+    player.killStreak = 0;
+    player.comboCount = 0;
+    player.comboTimer = 0;
+    player.comboMultiplier = 1;
+    player.killStreakSpeedTimer = 0;
+    player.rampageTimer = 0;
+    player.instantCooldownReady = false;
+    player.momentumNotice = '';
+    player.momentumDetail = '';
+    player.momentumNoticeTimer = 0;
+    player.comboFlashTimer = 0;
+    player.lastComboAction = null;
+  }
+
+  _registerComboAction(player, actionType) {
+    if (!player) return { count: 0, multiplier: 1, active: false };
+    player.comboCount = (player.comboTimer ?? 0) > 0
+      ? (player.comboCount ?? 0) + 1
+      : 1;
+    player.comboTimer = COMBO_WINDOW;
+    player.comboMultiplier = this._getComboMultiplier(player.comboCount);
+    player.comboFlashTimer = MOMENTUM_FLASH_DURATION;
+    player.lastComboAction = actionType;
+    return {
+      count: player.comboCount,
+      multiplier: player.comboMultiplier,
+      active: player.comboCount > 1,
+    };
+  }
+
+  _getComboMultiplier(count) {
+    if (!count || count <= 1) return 1;
+    return Math.min(COMBO_MAX_MULT, 1 + (count - 1) * COMBO_MULT_STEP);
+  }
+
+  _applyComboScore(baseScore, multiplier = 1) {
+    return Math.max(0, Math.round(baseScore * multiplier));
+  }
+
+  _formatComboMultiplier(multiplier = 1) {
+    return `x${Number.isInteger(multiplier) ? multiplier : multiplier.toFixed(1)}`;
+  }
+
+  _setMomentumNotice(player, notice, detail = '') {
+    if (!player) return;
+    player.momentumNotice = notice;
+    player.momentumDetail = detail;
+    player.momentumNoticeTimer = MOMENTUM_NOTICE_DURATION;
+    player.comboFlashTimer = Math.max(player.comboFlashTimer ?? 0, MOMENTUM_FLASH_DURATION);
+  }
+
+  _applyKillStreakRewards(player) {
+    if (!player) return;
+    const streak = player.killStreak ?? 0;
+    let notice = '';
+    let detail = '';
+    if (streak === KILLSTREAK_SPEED_THRESHOLD) {
+      player.killStreakSpeedTimer = KILLSTREAK_SPEED_DURATION;
+      notice = 'DOUBLE KILL';
+      detail = `MOVE +${Math.round((KILLSTREAK_SPEED_MULT - 1) * 100)}% • ${KILLSTREAK_SPEED_DURATION}S`;
+    } else if (streak === KILLSTREAK_COOLDOWN_RESET_THRESHOLD) {
+      player.instantCooldownReady = true;
+      player.cooldown = 0;
+      player.cooldown2 = 0;
+      player.ultCooldown = 0;
+      notice = 'TRIPLE KILL';
+      detail = 'COOLDOWNS RESET • NEXT CAST FREE';
+    } else if (streak === KILLSTREAK_RAMPAGE_THRESHOLD) {
+      player.rampageTimer = KILLSTREAK_RAMPAGE_DURATION;
+      notice = 'RAMPAGE';
+      detail = `DAMAGE +${Math.round((KILLSTREAK_RAMPAGE_MULT - 1) * 100)}% • ${KILLSTREAK_RAMPAGE_DURATION}S`;
+    }
+    if (!notice) return;
+    this._setMomentumNotice(player, notice, detail);
+    this.events.push({
+      text: `🔥 ${player.faction.toUpperCase()} ${notice}${detail ? ` — ${detail}` : ''}`,
+      faction: player.faction,
+      ttl: 3,
+    });
+    this.sparks.push(...Particle.burst(player.x, player.y, FACTIONS[player.faction].color, 16, {
+      speedMin: 90,
+      speedMax: 260,
+      lifeMin: 0.45,
+      lifeMax: 1.1,
+      sizeMin: 2.2,
+      sizeMax: 4.6,
+      drag: 1.4,
+    }));
+    this.sparks.push(...Particle.ring(player.x, player.y, '#ffd966', 36 + streak * 4, {
+      life: 0.75,
+      growth: 120,
+      lineWidth: 4,
+    }));
+    if (player === this.localPlayer) this.audio.playKillStreak(streak);
   }
 
   _updatePassiveEffects(player, dt) {
@@ -2920,6 +3098,17 @@ export class Game {
         ultCooldown: round(player.ultCooldown ?? 0),
         state: player.state,
         role: player.role,
+        killStreak: player.killStreak ?? 0,
+        comboCount: player.comboCount ?? 0,
+        comboTimer: round(player.comboTimer ?? 0),
+        comboMultiplier: round(player.comboMultiplier ?? 1, 2),
+        killStreakSpeedTimer: round(player.killStreakSpeedTimer ?? 0),
+        rampageTimer: round(player.rampageTimer ?? 0),
+        instantCooldownReady: !!player.instantCooldownReady,
+        momentumNotice: player.momentumNotice ?? '',
+        momentumDetail: player.momentumDetail ?? '',
+        momentumNoticeTimer: round(player.momentumNoticeTimer ?? 0),
+        comboFlashTimer: round(player.comboFlashTimer ?? 0),
         target: player.target ? { x: round(player.target.x), y: round(player.target.y) } : null,
         trailPoints: player.trailPoints.slice(-REPLAY_TRAIL_HISTORY_LENGTH).map(point => ({
           x: round(point.x),
@@ -3024,6 +3213,17 @@ export class Game {
       player.ultCooldown = snapshot.ultCooldown;
       player.state = snapshot.state;
       player.role = snapshot.role;
+      player.killStreak = snapshot.killStreak ?? 0;
+      player.comboCount = snapshot.comboCount ?? 0;
+      player.comboTimer = snapshot.comboTimer ?? 0;
+      player.comboMultiplier = snapshot.comboMultiplier ?? 1;
+      player.killStreakSpeedTimer = snapshot.killStreakSpeedTimer ?? 0;
+      player.rampageTimer = snapshot.rampageTimer ?? 0;
+      player.instantCooldownReady = !!snapshot.instantCooldownReady;
+      player.momentumNotice = snapshot.momentumNotice ?? '';
+      player.momentumDetail = snapshot.momentumDetail ?? '';
+      player.momentumNoticeTimer = snapshot.momentumNoticeTimer ?? 0;
+      player.comboFlashTimer = snapshot.comboFlashTimer ?? 0;
       player.target = snapshot.target ? { ...snapshot.target } : null;
       player.trailPoints = (snapshot.trailPoints ?? []).map(point => ({ ...point }));
       player.stats = { ...player.stats, ...(snapshot.stats ?? {}) };
@@ -3416,7 +3616,10 @@ export class Game {
         for (const p of this.players) {
           if (!p.alive || p.faction !== tl.faction) continue;
           const d = Math.sqrt((p.x - tl.x) ** 2 + (p.y - tl.y) ** 2);
-          if (d < CAPTURE_RANGE) p.recordStat('baseCaptures');
+          if (d < CAPTURE_RANGE) {
+            p.recordStat('baseCaptures');
+            this._registerComboAction(p, 'capture');
+          }
         }
         this.events.push({
           text: `🏰 ${tl.faction.toUpperCase()} captured a TRILOCK!`,
