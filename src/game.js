@@ -25,6 +25,7 @@ const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
+const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -582,7 +583,7 @@ export class Game {
       if (player.respawnTimer <= 0) {
         player.alive = true;
         player.maxHealth = player.baseMaxHealth;
-        player.health = player.baseMaxHealth;
+        player.health = player.maxHealth;
         const base = this.bases[player.faction];
         player.x = base.x + (Math.random() - 0.5) * 60;
         player.y = base.y + (Math.random() - 0.5) * 60;
@@ -1069,7 +1070,8 @@ export class Game {
     }
 
     if (player.passive?.id === 'overclock') {
-      state.sprintActive = Math.hypot(player.vx, player.vy) > player.speed * 0.55;
+      state.sprintActive = Math.hypot(player.vx, player.vy) >
+        player.speed * SPRINT_ACTIVATION_SPEED_RATIO;
       state.speedMult = state.sprintActive ? player.passive.sprintSpeedMult : 1;
       state.overclockStacks = Math.min(player.passive.maxStacks, state.overclockStacks ?? 0);
       return;

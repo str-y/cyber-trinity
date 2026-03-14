@@ -458,8 +458,8 @@ export class Player {
           (this.x + enemy.x) / 2,
           (this.y + enemy.y) / 2,
           FACTIONS[this.faction].color, 6));
-        if (enemy.health <= 0) {
-          world._recordElimination(enemy, this, 'eliminated');
+      if (enemy.health <= 0) {
+          world._recordElimination(enemy, this, 'melee KO');
         }
       }
     }

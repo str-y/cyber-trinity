@@ -328,21 +328,25 @@ export class HUD {
     let rows = [];
 
     if (local.passive?.id === 'data-cache') {
+      const deliveryPct = Math.round(((local.passive.deliveryBonusMult ?? 1) - 1) * 100);
       rows = [
-        this._passiveRow('📦', 'BASE BONUS', state.deliveryBonusActive ? 'ACTIVE +20%' : 'STANDBY'),
+        this._passiveRow('📦', 'BASE BONUS', state.deliveryBonusActive ? `ACTIVE +${deliveryPct}%` : 'STANDBY'),
         this._passiveRow('🛰', 'SCAN', `${Math.round(state.minimapVisionRadius ?? 0)} PX`),
       ];
     } else if (local.passive?.id === 'bio-regen') {
+      const regenPct = Math.round((local.passive.regenPctPerSec ?? 0) * 100);
+      const healthBonusPct = Math.round((local.passive.allyMaxHealthBonus ?? 0) * 100);
       rows = [
         this._passiveRow('🧬', 'REGEN', state.bioRegenActive
-          ? 'ACTIVE 5%/S'
+          ? `ACTIVE ${regenPct}%/S`
           : `READY IN ${Math.ceil(state.bioRegenDelayRemaining ?? 0)}S`),
-        this._passiveRow('🤝', 'ALLY LINK', state.nearbyAllyBonus ? '+15% HP' : 'NO BONUS'),
+        this._passiveRow('🤝', 'ALLY LINK', state.nearbyAllyBonus ? `+${healthBonusPct}% HP` : 'NO BONUS'),
       ];
     } else if (local.passive?.id === 'overclock') {
+      const sprintPct = Math.round(((local.passive.sprintSpeedMult ?? 1) - 1) * 100);
       rows = [
         this._passiveRow('⚙️', 'STACKS', `${state.overclockStacks ?? 0} / ${local.passive.maxStacks}`),
-        this._passiveRow('🏃', 'SPRINT', state.sprintActive ? '+10% ACTIVE' : 'IDLE'),
+        this._passiveRow('🏃', 'SPRINT', state.sprintActive ? `+${sprintPct}% ACTIVE` : 'IDLE'),
       ];
     }
 
