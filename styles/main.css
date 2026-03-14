@@ -580,6 +580,10 @@ html, body {
   pointer-events: none;
 }
 
+body.crt-disabled #scanlines {
+  display: none;
+}
+
 /* ── Match-end scoreboard ── */
 #match-scoreboard {
   position: absolute;
@@ -1004,6 +1008,85 @@ html, body {
 @keyframes hateGlow {
   from { filter: brightness(1); }
   to   { filter: brightness(1.5) drop-shadow(0 0 6px currentColor); }
+}
+
+/* ── Settings panel ── */
+#settings-panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 280px;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: rgba(1, 8, 26, 0.92);
+  border: 1px solid rgba(100, 180, 255, 0.45);
+  border-radius: 6px;
+  box-shadow: 0 0 24px rgba(74, 168, 255, 0.25);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  z-index: 200; /* Increased to stay above game UI but below overlays if needed */
+}
+
+#settings-panel.is-open {
+  display: flex;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.settings-header .panel-title {
+  margin-bottom: 0;
+}
+
+.settings-hint {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: rgba(160, 212, 255, 0.75);
+  border: 1px solid rgba(160, 212, 255, 0.3);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.setting-label {
+  opacity: 0.8;
+}
+
+.setting-row select {
+  min-width: 92px;
+  padding: 5px 8px;
+  background: rgba(5, 16, 36, 0.95);
+  border: 1px solid rgba(100, 180, 255, 0.35);
+  border-radius: 4px;
+  color: #e0f4ff;
+  font: inherit;
+  letter-spacing: 1px;
+}
+
+.setting-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #4aa8ff;
+}
+
+body.hud-hidden #hud > :not(#settings-panel):not(#scanlines) {
+  display: none !important;
 }
 
 @media (max-width: 900px) {

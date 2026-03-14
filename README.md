@@ -222,14 +222,16 @@ Controls (browser preview):
 - Choose your starting faction on the launch screen before deploying.
 - `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
 - `Space`: activate job ability (Warrior: Power Slash) when charged
+- `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT)
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
 - `V`: toggle spectator mode at any time during the match
 - `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
-- `[` / `]`: switch the followed- `R`: enter replay mode after a match ends
+- `[` / `]`: switch the followed agent in spectator mode
+- `R`: enter replay mode after a match ends
 - `L`: load a saved replay file
-- `Space`: play/pause replay playback
+- `Space`: play/pause replay playback (in replay mode)
 - `[` / `]`: seek backward/forward 5 seconds in replay
 - Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
 - Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time

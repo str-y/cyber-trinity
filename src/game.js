@@ -403,7 +403,16 @@ export class Game {
       green: { active: false, cooldown: 0 },
       red: { active: false, cooldown: 0 },
     };
+    this.settings = {
+      gameSpeed: 1,
+      effectQuality: 'high',
+      hudVisible: true,
+      crtEnabled: true,
+      panelOpen: false,
+    };
     this._bindInput();
+    this._initSettingsPanel();
+    this._applySettings();
 
     // ── Alliance (temporary 2-vs-1 pact) ─────────────────────────────────
     // When active: { members: [faction, faction], target: faction }
@@ -581,6 +590,13 @@ export class Game {
       );
     };
     window.addEventListener('keydown', e => {
+      if (e.code === 'Escape' && !e.repeat) {
+        e.preventDefault();
+        this._toggleSettingsPanel();
+        return;
+      }
+      if (this._isSettingsEventTarget(e.target)) return;
+
       let handled = setKey(e.code, true);
       if (!e.repeat && JOB_SWITCH_SHORTCUTS[e.code] && this._isSandboxMode()) {
         this.switchLocalJob(JOB_SWITCH_SHORTCUTS[e.code]);
@@ -606,9 +622,84 @@ export class Game {
       if (handled) e.preventDefault();
     });
     window.addEventListener('keyup', e => {
+      if (e.code === 'Escape' || this._isSettingsEventTarget(e.target)) return;
       if (setKey(e.code, false)) e.preventDefault();
     });
     this.canvas.addEventListener('click', e => this._handleCanvasClick(e));
+  }
+
+  _isSettingsEventTarget(target) {
+    return !!(this._settingsPanel && target instanceof Element && this._settingsPanel.contains(target));
+  }
+
+  _initSettingsPanel() {
+    const panel = document.getElementById('settings-panel');
+    if (!panel) return;
+
+    const speed = document.getElementById('setting-game-speed');
+    const quality = document.getElementById('setting-effect-quality');
+    const hudToggle = document.getElementById('setting-hud-visible');
+    const crtToggle = document.getElementById('setting-crt-enabled');
+
+    this._settingsPanel = panel;
+    this._settingsControls = { speed, quality, hudToggle, crtToggle };
+
+    if (speed) {
+      speed.value = String(this.settings.gameSpeed);
+      speed.addEventListener('change', () => {
+        this.settings.gameSpeed = Number(speed.value) || 1;
+      });
+    }
+
+    if (quality) {
+      quality.value = this.settings.effectQuality;
+      quality.addEventListener('change', () => {
+        this.settings.effectQuality = quality.value === 'low' ? 'low' : 'high';
+      });
+    }
+
+    if (hudToggle) {
+      hudToggle.checked = this.settings.hudVisible;
+      hudToggle.addEventListener('change', () => {
+        this.settings.hudVisible = hudToggle.checked;
+        this._applySettings();
+      });
+    }
+
+    if (crtToggle) {
+      crtToggle.checked = this.settings.crtEnabled;
+      crtToggle.addEventListener('change', () => {
+        this.settings.crtEnabled = crtToggle.checked;
+        this._applySettings();
+      });
+    }
+  }
+
+  _toggleSettingsPanel() {
+    this.settings.panelOpen = !this.settings.panelOpen;
+    this._resetInput();
+    this._applySettings();
+    if (this.settings.panelOpen) {
+      this._settingsControls?.speed?.focus();
+    }
+  }
+
+  _resetInput() {
+    this.input.up = false;
+    this.input.down = false;
+    this.input.left = false;
+    this.input.right = false;
+    this.input.ability = false;
+    this._abilityLatch = false;
+  }
+
+  _applySettings() {
+    document.body.classList.toggle('hud-hidden', !this.settings.hudVisible);
+    document.body.classList.toggle('crt-disabled', !this.settings.crtEnabled);
+    if (this._settingsPanel) {
+      this._settingsPanel.classList.toggle('is-open', this.settings.panelOpen);
+      this._settingsPanel.setAttribute('aria-hidden', String(!this.settings.panelOpen));
+    }
   }
 
   _handleCanvasClick(event) {
@@ -959,7 +1050,7 @@ export class Game {
 
   _loop(ts) {
     if (!this.running) return;
-    const dt = Math.min((ts - this._lastTs) / 1000, 0.05);
+    const dt = Math.min((ts - this._lastTs) / 1000, 0.05) * this.settings.gameSpeed;
     this._lastTs = ts;
     this._lastDt = dt;
 
