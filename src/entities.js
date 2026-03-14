@@ -210,6 +210,8 @@ export class Base {
     this.captureProgress = faction ? CAPTURE_MAX : 0;  // 0–100
     this.captureFaction  = faction;   // which faction is accumulating progress
     this.level = faction ? 1 : 0;    // 0 = neutral, 1–3 = captured levels
+    this.highValue = false;
+    this.highValueMultiplier = 1;
   }
 
   update(dt) {
@@ -267,7 +269,7 @@ export class Base {
     if (this.crystalsStored >= TRILOCK_LEVEL_3_THRESHOLD && this.level < 3) this.level = 3;
     else if (this.crystalsStored >= TRILOCK_LEVEL_2_THRESHOLD && this.level < 2) this.level = 2;
     // Delivery bonus scales with level: Lv1 ×1, Lv2 ×1.25, Lv3 ×1.5
-    const mult = 1 + (this.level - 1) * 0.25;
+    const mult = (1 + (this.level - 1) * 0.25) * (this.highValueMultiplier ?? 1);
     return Math.round(value * mult);
   }
 }
@@ -298,14 +300,6 @@ export class Player {
     // ── Job system (replaces faction-locked abilities) ─────────────────────
     const jobAssignment = options.jobAssignment ?? JOB_ASSIGNMENT;
     const jobId  = jobAssignment[index] ?? 'warrior';
-    const jobDef = JOBS[jobId];
-    this.job       = jobId;
-    this.jobDef    = jobDef;
-    this.speed     = jobDef.speed;
-    this.aggro     = jobDef.aggro;
-    this.baseMaxHealth = jobDef.maxHealth;
-    this.health    = jobDef.maxHealth;
-    this.maxHealth = jobDef.maxHealth;
     this.energy    = 100;
     this.lastCombatTime = -Infinity;
     this.passiveState = {
@@ -319,24 +313,8 @@ export class Player {
       sprintActive: false,
     };
 
-    // Primary skill (slot 0) used by AI and player
-    const primary   = jobDef.skills[0];
-    this.abilityName = primary.name;
-    this.abilityCost = primary.cost;
-    this.abilityMax  = primary.cooldown;
-    this.cooldown    = 0;
-
-    // Secondary skill
-    const secondary     = jobDef.skills[1];
-    this.ability2Name   = secondary.name;
-    this.ability2Cost   = secondary.cost;
-    this.ability2Max    = secondary.cooldown;
-    this.cooldown2      = 0;
-
-    // Ultimate
-    this.ultName    = jobDef.ultimate.name;
-    this.ultCost    = jobDef.ultimate.cost;
-    this.ultMax     = jobDef.ultimate.cooldown;
+    this.cooldown = 0;
+    this.cooldown2 = 0;
     this.ultCooldown = 0;
 
     // AI role based on job: healers/scouts → collector, warriors → fighter, mage index-based
@@ -346,6 +324,10 @@ export class Player {
 
     this.stats = createPlayerStats();
     this.sessionStats = createPlayerStats();
+
+    this.aiDisabled = !!options.aiDisabled;
+    this.isDummy = !!options.isDummy;
+    this.setJob(jobId, { refillEnergy: true, resetCooldowns: true, preserveHealthRatio: false });
   }
 
   update(dt, world) {
@@ -357,9 +339,19 @@ export class Player {
         this.alive = true;
         this.maxHealth = this.baseMaxHealth;
         this.health = this.baseMaxHealth;
-        const base = world.bases[this.faction];
-        this.x = base.x + randRange(-30, 30);
-        this.y = base.y + randRange(-30, 30);
+        this.energy = 100;
+        this.cooldown = 0;
+        this.cooldown2 = 0;
+        this.ultCooldown = 0;
+        const point = world.getRespawnPoint?.(this);
+        if (point) {
+          this.x = point.x;
+          this.y = point.y;
+        } else {
+          const base = world.bases[this.faction];
+          this.x = base.x + randRange(-30, 30);
+          this.y = base.y + randRange(-30, 30);
+        }
         this.carrying = [];
       }
       return;
@@ -368,10 +360,68 @@ export class Player {
     if (this.cooldown > 0)     this.cooldown     = Math.max(0, this.cooldown - dt);
     if (this.cooldown2 > 0)    this.cooldown2    = Math.max(0, this.cooldown2 - dt);
     if (this.ultCooldown > 0)  this.ultCooldown  = Math.max(0, this.ultCooldown - dt);
+    if (this.aiDisabled) {
+      this.vx *= 0.7;
+      this.vy *= 0.7;
+      return;
+    }
 
     this._ai(dt, world);
     this._move(dt, world);
     this._updateTrail();
+  }
+
+  setJob(jobId, options = {}) {
+    const {
+      refillEnergy = false,
+      resetCooldowns = false,
+      preserveHealthRatio = true,
+    } = options;
+    const jobDef = JOBS[jobId] ?? JOBS.warrior;
+    const nextJobId = jobDef.id ?? 'warrior';
+    const healthRatio = preserveHealthRatio && this.maxHealth > 0
+      ? Math.max(0, Math.min(1, this.health / this.maxHealth))
+      : 1;
+
+    this.job = nextJobId;
+    this.jobDef = jobDef;
+    this.speed = jobDef.speed;
+    this.aggro = jobDef.aggro;
+    this.baseMaxHealth = jobDef.maxHealth;
+    this.maxHealth = jobDef.maxHealth;
+    this.health = this.alive === false
+      ? 0
+      : Math.max(1, Math.round(jobDef.maxHealth * healthRatio));
+
+    const primary = jobDef.skills[0];
+    this.abilityName = primary.name;
+    this.abilityCost = primary.cost;
+    this.abilityMax = primary.cooldown;
+
+    const secondary = jobDef.skills[1];
+    this.ability2Name = secondary.name;
+    this.ability2Cost = secondary.cost;
+    this.ability2Max = secondary.cooldown;
+
+    this.ultName = jobDef.ultimate.name;
+    this.ultCost = jobDef.ultimate.cost;
+    this.ultMax = jobDef.ultimate.cooldown;
+
+    if (resetCooldowns) {
+      this.cooldown = 0;
+      this.cooldown2 = 0;
+      this.ultCooldown = 0;
+    } else {
+      this.cooldown = Math.min(this.cooldown ?? 0, this.abilityMax);
+      this.cooldown2 = Math.min(this.cooldown2 ?? 0, this.ability2Max);
+      this.ultCooldown = Math.min(this.ultCooldown ?? 0, this.ultMax);
+    }
+
+    if (refillEnergy) this.energy = 100;
+
+    if (nextJobId === 'scout' || nextJobId === 'healer') this.role = 'collector';
+    else if (this.index === 4) this.role = 'defender';
+    else this.role = 'fighter';
   }
 
   // ── Role-based behaviour AI ─────────────────────────────────────────────────
@@ -461,6 +511,7 @@ export class Player {
         this.markCombat(world.elapsed);
         enemy.markCombat(world.elapsed);
         enemy.health -= dmg;
+        world._spawnDamageNumber?.(enemy.x, enemy.y - 14, Math.round(dmg), FACTIONS[this.faction].color);
         world.sparks.push(...Particle.burst(
           (this.x + enemy.x) / 2,
           (this.y + enemy.y) / 2,
@@ -740,7 +791,8 @@ export class Player {
         this.passiveState?.overclockStacks ?? 0,
       ))
       : 0;
-    this.cooldown = Math.max(0, this.abilityMax - cooldownReduction);
+    const cooldownMult = world._getAbilityCooldownMultiplier?.() ?? 1;
+    this.cooldown = Math.max(0, this.abilityMax * cooldownMult - cooldownReduction);
     if (this.passive?.id === 'overclock' && this.passiveState) {
       this.passiveState.overclockStacks = 0;
     }

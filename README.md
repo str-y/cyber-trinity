@@ -146,7 +146,7 @@ Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Sco
 - **Death penalty** — killed agents drop ALL carried jewels on the ground.
 - **Hate control** — AI fighters target the leading team 60% of the time.
 - **Combat scoring**: defeating an enemy agent grants **+5 points**, and recent damage contributors receive an **assist +2 points**.
-- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload.
+- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload, and Data Storm.
 - **Feature contracts** chain: Overclock Uplink → Deploy Firewall → Core Meltdown.
 
 ---
@@ -222,14 +222,16 @@ Controls (browser preview):
 - Choose your starting faction on the launch screen before deploying.
 - `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
 - `Space`: activate job ability (Warrior: Power Slash) when charged
+- `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT)
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
 - `V`: toggle spectator mode at any time during the match
 - `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
-- `[` / `]`: switch the followed- `R`: enter replay mode after a match ends
+- `[` / `]`: switch the followed agent in spectator mode
+- `R`: enter replay mode after a match ends
 - `L`: load a saved replay file
-- `Space`: play/pause replay playback
+- `Space`: play/pause replay playback (in replay mode)
 - `[` / `]`: seek backward/forward 5 seconds in replay
 - Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
 - Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time

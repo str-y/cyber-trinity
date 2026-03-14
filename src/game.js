@@ -6,8 +6,8 @@
  * with capturable TriLock bases, value-tiered jewels, job system and hate control.
  */
 
-import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS,
-         PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS,
+import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS, JOBS,
+         PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS, ABILITY_RANGE,
          CAPTURE_RANGE, MAX_CARRY } from './entities.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
@@ -107,6 +107,46 @@ const MODE_RULES = {
     legendarySpreadRatio: 0.10,
     jobAssignment: ['warrior', 'scout'],
   },
+  tutorial: {
+    playersPerFaction: 1,
+    matchDuration: MATCH_DURATION,
+    winScore: 0,
+    trilockCount: 1,
+    baseMarginRatio: 0.24,
+    trilockRingRatio: 0.12,
+    spawnOrbit: 0,
+    spawnOrbitVariance: 0,
+    crystalCountMult: 0.25,
+    bonusJewelInterval: Number.POSITIVE_INFINITY,
+    crystalRainInterval: 1.5,
+    featureTriggerScale: 1,
+    guardianInitialSpawn: Number.POSITIVE_INFINITY,
+    guardianRespawnTime: Number.POSITIVE_INFINITY,
+    normalInset: 120,
+    rareSpreadRatio: 0.16,
+    legendarySpreadRatio: 0.10,
+    jobAssignment: ['warrior'],
+  },
+  practice: {
+    playersPerFaction: 1,
+    matchDuration: MATCH_DURATION,
+    winScore: 0,
+    trilockCount: 1,
+    baseMarginRatio: 0.24,
+    trilockRingRatio: 0.12,
+    spawnOrbit: 0,
+    spawnOrbitVariance: 0,
+    crystalCountMult: 0.4,
+    bonusJewelInterval: Number.POSITIVE_INFINITY,
+    crystalRainInterval: 1.5,
+    featureTriggerScale: 1,
+    guardianInitialSpawn: Number.POSITIVE_INFINITY,
+    guardianRespawnTime: Number.POSITIVE_INFINITY,
+    normalInset: 120,
+    rareSpreadRatio: 0.16,
+    legendarySpreadRatio: 0.10,
+    jobAssignment: ['warrior'],
+  },
 };
 
 function getModeRules(mode = 'standard') {
@@ -126,6 +166,53 @@ function createFactionStats() {
     deliveryScore: 0,
   };
 }
+
+const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout'];
+const JOB_SWITCH_SHORTCUTS = {
+  Digit1: 'warrior',
+  Digit2: 'mage',
+  Digit3: 'healer',
+  Digit4: 'scout',
+};
+const TUTORIAL_STEPS = [
+  {
+    id: 'movement',
+    title: 'STEP 1 · MOVEMENT / CAMERA',
+    body: 'Move with WASD or Arrow keys, then press V to enter spectator mode, C to cycle the camera, and V again to return to your agent.',
+    highlightIds: ['status-left', 'spectator-panel'],
+  },
+  {
+    id: 'crystal',
+    title: 'STEP 2 · CRYSTAL DELIVERY',
+    body: 'Pick up the highlighted crystal and carry it back into your home base to score. Deliveries are the fastest way to build momentum.',
+    highlightIds: ['crystal-counter', 'status-left'],
+  },
+  {
+    id: 'capture',
+    title: 'STEP 3 · BASE CAPTURE',
+    body: 'Stand inside the neutral TriLock until the capture ring completes. Captured bases become extra delivery points for your faction.',
+    highlightIds: ['score-panel'],
+  },
+  {
+    id: 'jobs',
+    title: 'STEP 4 · JOB ABILITIES',
+    body: 'Swap between all four jobs with the training buttons or 1-4, then press Space once with each job to feel the difference in range and role.',
+    highlightIds: ['status-right'],
+    showJobSwitcher: true,
+  },
+  {
+    id: 'alliance',
+    title: 'STEP 5 · TEMPORARY ALLIANCE',
+    body: 'When one faction runs away with the score, the other two temporarily ally. Watch the banner, then press Tab to lock onto the priority target.',
+    highlightIds: ['alliance-indicator', 'score-panel'],
+  },
+  {
+    id: 'chaos',
+    title: 'STEP 6 · CHAOS EVENT RESPONSE',
+    body: 'Chaos Events disrupt every match. Move outside the EMP Storm ring before the timer expires to finish the tutorial.',
+    highlightIds: ['chaos-event-banner'],
+  },
+];
 
 function createFeatureContracts(modeRules) {
   return FEATURE_CONTRACTS.map(contract => ({
@@ -167,6 +254,14 @@ const CHAOS_EVENTS = [
     description: 'All base shields down — rush the enemy!',
     color: '#ff66ff',
     emoji: '💥',
+  },
+  {
+    type: 'data_storm',
+    name: 'DATA STORM',
+    duration: 30,
+    description: 'Minimap jammed. Cooldowns x1.5. One base pays x3.',
+    color: '#7df2ff',
+    emoji: '📡',
   },
 ];
 
@@ -224,7 +319,7 @@ export class Game {
     this._lastDt  = 0;
     this.playerFaction = options.playerFaction ?? 'blue';
 
-    const gameMode = options.gameMode === 'quick' ? 'quick' : 'standard';
+    const gameMode = MODE_RULES[options.gameMode] ? options.gameMode : 'standard';
     this.modeRules = getModeRules(gameMode);
 
     // ── Lobby config (all settings from the pre-match lobby) ───────────────
@@ -240,6 +335,19 @@ export class Game {
         green: options.aiDifficulty?.green ?? 'normal',
         red:   options.aiDifficulty?.red   ?? 'normal',
       },
+    };
+    this.damageNumbers = [];
+    this.trainingMessage = '';
+    this.tutorial = null;
+    this.practiceState = null;
+    this._tutorialPendingAdvance = false;
+    this._tutorialMetrics = {
+      movementDistance: 0,
+      spectatorUsed: false,
+      cameraCycleUsed: false,
+      targetUsed: false,
+      usedJobs: {},
+      deliveryDone: false,
     };
 
     this.width  = 0;
@@ -309,7 +417,16 @@ export class Game {
       green: { active: false, cooldown: 0 },
       red: { active: false, cooldown: 0 },
     };
+    this.settings = {
+      gameSpeed: 1,
+      effectQuality: 'high',
+      hudVisible: true,
+      crtEnabled: true,
+      panelOpen: false,
+    };
     this._bindInput();
+    this._initSettingsPanel();
+    this._applySettings();
 
     // ── Alliance (temporary 2-vs-1 pact) ─────────────────────────────────
     // When active: { members: [faction, faction], target: faction }
@@ -319,11 +436,50 @@ export class Game {
     this.chaosEvent = null;          // active event object or null
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;  // countdown to next event
     this._crystalRainAccum = 0;      // accumulator for crystal rain spawns
+    this.highValueBase = null;
     this.nexusGuardian = null;
 
     // ── Jewel respawn timer ─────────────────────────────────────────────────
     this._jewelRespawnAccum = 0;
     this.sessionMatches = 0;
+    this._configureModeState();
+  }
+
+  _isTutorialMode() {
+    return this.config.gameMode === 'tutorial';
+  }
+
+  _isPracticeMode() {
+    return this.config.gameMode === 'practice';
+  }
+
+  _isSandboxMode() {
+    return this._isTutorialMode() || this._isPracticeMode();
+  }
+
+  _configureModeState() {
+    this.matchTimer = this._isSandboxMode() ? Number.POSITIVE_INFINITY : this.config.matchDuration;
+    this.trainingMessage = this._isPracticeMode()
+      ? 'PRACTICE SANDBOX — Switch jobs with 1-4 and test abilities on the dummy agents.'
+      : '';
+    this.practiceState = this._isPracticeMode() ? { lastSwitchedJob: null } : null;
+    this._tutorialMetrics = {
+      movementDistance: 0,
+      spectatorUsed: false,
+      cameraCycleUsed: false,
+      targetUsed: false,
+      usedJobs: {},
+      deliveryDone: false,
+    };
+    if (this._isTutorialMode()) {
+      this.tutorial = {
+        stepIndex: 0,
+        complete: false,
+        transitioned: false,
+      };
+    } else {
+      this.tutorial = null;
+    }
   }
 
   // ── Feature contract accessor (used by HUD and renderer) ─────────────────
@@ -333,7 +489,8 @@ export class Game {
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  start() {
+  start(chosenFaction = 'blue') {
+    this.chosenFaction = chosenFaction;
     this._resize();
     window.addEventListener('resize', () => this._resize());
     this._spawn();
@@ -391,6 +548,11 @@ export class Game {
           p.aggro                = Math.min(1, p.aggro * diff.aggroMult);
           p.abilityDifficultyMult = diff.abilityMult;  // per-frame ability chance scalar
         }
+        if (this._isSandboxMode() && !isHumanPlayer) {
+          p.aiDisabled = true;
+          p.isDummy = true;
+          p.abilityDifficultyMult = 0;
+        }
         // Stagger cooldowns
         p.cooldown = Math.random() * p.abilityMax;
         this.players.push(p);
@@ -416,6 +578,7 @@ export class Game {
     // ── Data stream particles ─────────────────────────────────────────────
     this._initDataStreams();
     this.resetReplayCamera();
+    if (this._isSandboxMode()) this._setupSandboxMode();
   }
 
   _bindInput() {
@@ -442,12 +605,25 @@ export class Game {
       );
     };
     window.addEventListener('keydown', e => {
+      if (e.code === 'Escape' && !e.repeat) {
+        e.preventDefault();
+        this._toggleSettingsPanel();
+        return;
+      }
+      if (this._isSettingsEventTarget(e.target)) return;
+
       let handled = setKey(e.code, true);
+      if (!e.repeat && JOB_SWITCH_SHORTCUTS[e.code] && this._isSandboxMode()) {
+        this.switchLocalJob(JOB_SWITCH_SHORTCUTS[e.code]);
+        handled = true;
+      }
       if (!e.repeat) {
         if (e.code === 'KeyV') {
+          if (this._isTutorialMode()) this._tutorialMetrics.spectatorUsed = true;
           this._toggleSpectatorMode();
           handled = true;
         } else if (e.code === 'KeyC') {
+          if (this._isTutorialMode()) this._tutorialMetrics.cameraCycleUsed = true;
           this._cycleSpectatorCameraMode();
           handled = true;
         } else if (e.code === 'BracketLeft') {
@@ -461,9 +637,84 @@ export class Game {
       if (handled) e.preventDefault();
     });
     window.addEventListener('keyup', e => {
+      if (e.code === 'Escape' || this._isSettingsEventTarget(e.target)) return;
       if (setKey(e.code, false)) e.preventDefault();
     });
     this.canvas.addEventListener('click', e => this._handleCanvasClick(e));
+  }
+
+  _isSettingsEventTarget(target) {
+    return !!(this._settingsPanel && target instanceof Element && this._settingsPanel.contains(target));
+  }
+
+  _initSettingsPanel() {
+    const panel = document.getElementById('settings-panel');
+    if (!panel) return;
+
+    const speed = document.getElementById('setting-game-speed');
+    const quality = document.getElementById('setting-effect-quality');
+    const hudToggle = document.getElementById('setting-hud-visible');
+    const crtToggle = document.getElementById('setting-crt-enabled');
+
+    this._settingsPanel = panel;
+    this._settingsControls = { speed, quality, hudToggle, crtToggle };
+
+    if (speed) {
+      speed.value = String(this.settings.gameSpeed);
+      speed.addEventListener('change', () => {
+        this.settings.gameSpeed = Number(speed.value) || 1;
+      });
+    }
+
+    if (quality) {
+      quality.value = this.settings.effectQuality;
+      quality.addEventListener('change', () => {
+        this.settings.effectQuality = quality.value === 'low' ? 'low' : 'high';
+      });
+    }
+
+    if (hudToggle) {
+      hudToggle.checked = this.settings.hudVisible;
+      hudToggle.addEventListener('change', () => {
+        this.settings.hudVisible = hudToggle.checked;
+        this._applySettings();
+      });
+    }
+
+    if (crtToggle) {
+      crtToggle.checked = this.settings.crtEnabled;
+      crtToggle.addEventListener('change', () => {
+        this.settings.crtEnabled = crtToggle.checked;
+        this._applySettings();
+      });
+    }
+  }
+
+  _toggleSettingsPanel() {
+    this.settings.panelOpen = !this.settings.panelOpen;
+    this._resetInput();
+    this._applySettings();
+    if (this.settings.panelOpen) {
+      this._settingsControls?.speed?.focus();
+    }
+  }
+
+  _resetInput() {
+    this.input.up = false;
+    this.input.down = false;
+    this.input.left = false;
+    this.input.right = false;
+    this.input.ability = false;
+    this._abilityLatch = false;
+  }
+
+  _applySettings() {
+    document.body.classList.toggle('hud-hidden', !this.settings.hudVisible);
+    document.body.classList.toggle('crt-disabled', !this.settings.crtEnabled);
+    if (this._settingsPanel) {
+      this._settingsPanel.classList.toggle('is-open', this.settings.panelOpen);
+      this._settingsPanel.setAttribute('aria-hidden', String(!this.settings.panelOpen));
+    }
   }
 
   _handleCanvasClick(event) {
@@ -471,6 +722,191 @@ export class Game {
     if (!point) return;
     this._issueMinimapPin(point.x, point.y);
     event.preventDefault();
+  }
+
+  getRespawnPoint(player) {
+    if (!this._isSandboxMode()) return null;
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+    if (player === this.localPlayer) return { x: cx, y: cy + 95 };
+    const dummies = this.players.filter(candidate => candidate.isDummy);
+    const index = Math.max(0, dummies.indexOf(player));
+    const points = [
+      { x: cx - 90, y: cy - 10 },
+      { x: cx + 90, y: cy - 10 },
+      { x: cx, y: cy - 120 },
+    ];
+    return points[index] ?? { x: cx + (index - 1) * 90, y: cy - 40 };
+  }
+
+  _setupSandboxMode() {
+    this.featureContracts = [];
+    this.featureIndex = 0;
+    this.factionBuffs = {};
+    this.guardianBlessings = {};
+    this.focusedEnemy = null;
+    this.rallySignal = null;
+    this.minimapPins = [];
+    this.events = [];
+    this.projectiles = [];
+    this.damageNumbers = [];
+    for (const player of this.players) {
+      player.energy = 100;
+      player.cooldown = 0;
+      player.cooldown2 = 0;
+      player.ultCooldown = 0;
+      player.carrying = [];
+      player.alive = true;
+      player.respawnTimer = 0;
+      player.target = null;
+      player.state = 'roam';
+      player.health = player.baseMaxHealth;
+      player.maxHealth = player.baseMaxHealth;
+      player.trailPoints = [];
+      const point = this.getRespawnPoint(player);
+      if (point) {
+        player.x = point.x;
+        player.y = point.y;
+      }
+    }
+
+    this.crystals = [];
+    this.scores = { blue: 0, green: 0, red: 0 };
+    this.stats = {
+      blue: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+      green: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+      red: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+    };
+    this.alliance = null;
+    this.chaosEvent = null;
+    this.chaosEventTimer = Number.POSITIVE_INFINITY;
+    this.nexusGuardian = {
+      ...this.nexusGuardian,
+      state: 'waiting',
+      timer: Number.POSITIVE_INFINITY,
+      health: 0,
+      maxHealth: NEXUS_GUARDIAN_BASE_HEALTH,
+    };
+
+    if (this._isPracticeMode()) {
+      const cx = this.width / 2;
+      const cy = this.height / 2;
+      const rareTier = JEWEL_TIERS.find(tier => tier.tier === 'rare') ?? JEWEL_TIERS[0];
+      this.crystals.push(
+        new MemoryCrystal(cx, cy + 40, JEWEL_TIERS[0]),
+        new MemoryCrystal(cx - 120, cy + 65, JEWEL_TIERS[0]),
+        new MemoryCrystal(cx + 120, cy + 65, rareTier),
+      );
+      if (this.trilocks[0]) {
+        this.trilocks[0].faction = null;
+        this.trilocks[0].captureFaction = null;
+        this.trilocks[0].captureProgress = 0;
+        this.trilocks[0].level = 0;
+        this.trilocks[0].x = cx;
+        this.trilocks[0].y = cy - 135;
+      }
+    }
+
+    if (this._isTutorialMode()) this._prepareTutorialStep();
+  }
+
+  _currentTutorialStep() {
+    return this.tutorial ? TUTORIAL_STEPS[this.tutorial.stepIndex] ?? null : null;
+  }
+
+  _prepareTutorialStep() {
+    if (!this.tutorial || !this.localPlayer) return;
+    const local = this.localPlayer;
+    const cx = this.width / 2;
+    const cy = this.height / 2;
+    const step = this._currentTutorialStep();
+    this._tutorialPendingAdvance = false;
+    this._tutorialMetrics.deliveryDone = false;
+    this._tutorialMetrics.targetUsed = false;
+    this.focusedEnemy = null;
+    this.rallySignal = null;
+    this.spectatorMode = false;
+    this.spectatorCameraMode = 'overhead';
+    this.spectatorTarget = local;
+    this.projectiles = [];
+    this.damageNumbers = [];
+    this.sparks = [];
+    this.events = [];
+    this.chaosEvent = null;
+    this.alliance = null;
+    for (const player of this.players) {
+      player.energy = 100;
+      player.cooldown = 0;
+      player.cooldown2 = 0;
+      player.ultCooldown = 0;
+      player.carrying = [];
+      player.health = player.baseMaxHealth;
+      player.maxHealth = player.baseMaxHealth;
+      player.alive = true;
+      player.respawnTimer = 0;
+      player.target = null;
+      player.state = 'roam';
+      player.trailPoints = [];
+      const point = this.getRespawnPoint(player);
+      if (point) {
+        player.x = point.x;
+        player.y = point.y;
+      }
+    }
+    this.crystals = [];
+    this.scores = { blue: 0, green: 0, red: 0 };
+    for (const base of this.trilocks) {
+      base.faction = null;
+      base.captureFaction = null;
+      base.captureProgress = 0;
+      base.level = 0;
+      base.crystalsStored = 0;
+      base.x = cx;
+      base.y = cy - 120;
+    }
+    if (!step) return;
+
+    if (step.id === 'movement') {
+      this._tutorialMetrics.movementDistance = 0;
+      this._tutorialMetrics.spectatorUsed = false;
+      this._tutorialMetrics.cameraCycleUsed = false;
+      local.x = cx;
+      local.y = cy + 120;
+    } else if (step.id === 'crystal') {
+      const home = this.bases[local.faction];
+      local.x = home.x;
+      local.y = Math.min(this.height - PLAYER_RADIUS - 18, home.y + 95);
+      this.crystals.push(new MemoryCrystal(home.x, local.y - 48, JEWEL_TIERS[0]));
+    } else if (step.id === 'capture') {
+      local.x = cx;
+      local.y = cy - 40;
+    } else if (step.id === 'jobs') {
+      this._tutorialMetrics.usedJobs = {};
+      local.setJob('warrior', { refillEnergy: true, resetCooldowns: true, preserveHealthRatio: false });
+      local.x = cx;
+      local.y = cy + 90;
+    } else if (step.id === 'alliance') {
+      local.x = cx;
+      local.y = cy + 90;
+      this.scores = { blue: 65, green: 38, red: 20 };
+      this._updateAlliance();
+      this._tutorialMetrics.targetUsed = false;
+    } else if (step.id === 'chaos') {
+      local.x = cx;
+      local.y = cy + 100;
+      this.chaosEvent = {
+        type: 'emp_storm',
+        name: 'EMP STORM',
+        duration: 12,
+        description: 'Exit the EMP field to restore your systems.',
+        color: '#ffcc00',
+        emoji: '⚡',
+        remaining: 12,
+        x: cx,
+        y: cy + 30,
+        radius: 120,
+      };
+    }
   }
 
   _positionBases() {
@@ -629,7 +1065,7 @@ export class Game {
 
   _loop(ts) {
     if (!this.running) return;
-    const dt = Math.min((ts - this._lastTs) / 1000, 0.05);
+    const dt = Math.min((ts - this._lastTs) / 1000, 0.05) * this.settings.gameSpeed;
     this._lastTs = ts;
     this._lastDt = dt;
 
@@ -654,14 +1090,14 @@ export class Game {
       return;
     }
     this.elapsed += dt;
-    this.matchTimer -= dt;
+    if (Number.isFinite(this.matchTimer)) this.matchTimer -= dt;
 
     // Home bases
     for (const base of Object.values(this.bases)) base.update(dt);
 
     // TriLock capture logic
     this._updateTriLocks(dt);
-    this._updateNexusGuardian(dt);
+    if (!this._isSandboxMode()) this._updateNexusGuardian(dt);
 
     // Alliance evaluation (before AI so targeting reflects current pact)
     this._updateAlliance();
@@ -727,6 +1163,7 @@ export class Game {
           this._abilityLatch = true;
           const proj = player.tryAbility(this);
           if (proj) {
+            if (this._isTutorialMode()) this._tutorialMetrics.usedJobs[player.job] = true;
             this.projectiles.push(proj);
             this.audio.playAbility(player.faction, player.job);
             this.events.push({
@@ -761,7 +1198,7 @@ export class Game {
     for (const c of this.crystals) c.update(dt);
 
     // Next feature contract (who/when/what + completion effects)
-    this._updateNextFeature(dt);
+    if (!this._isSandboxMode()) this._updateNextFeature(dt);
     this._updateGuardianBlessings(dt);
 
     // Chaos events (EMP Storm, Crystal Rain, Nexus Overload)
@@ -799,6 +1236,13 @@ export class Game {
     // Sparks
     for (const p of this.sparks) p.update(dt);
     this.sparks = this.sparks.filter(p => !p.dead);
+    this.damageNumbers = this.damageNumbers
+      .map(number => ({
+        ...number,
+        y: number.y - 36 * dt,
+        ttl: number.ttl - dt,
+      }))
+      .filter(number => number.ttl > 0);
 
     // Rain
     for (const d of this.rain) d.update(dt);
@@ -831,8 +1275,188 @@ export class Game {
     }
 
     this._updateSpectatorState(dt);
+    this._updateModeScenario(dt);
     this._checkMatchEnd();
     this.replay.recordFrame();
+  }
+
+  _updateModeScenario(dt) {
+    if (this._isTutorialMode()) {
+      const step = this._currentTutorialStep();
+      const local = this.localPlayer;
+      if (!step || !local) return;
+      if (step.id === 'movement') {
+        this._tutorialPendingAdvance =
+          this._tutorialMetrics.movementDistance >= 120 &&
+          this._tutorialMetrics.spectatorUsed &&
+          this._tutorialMetrics.cameraCycleUsed;
+      } else if (step.id === 'crystal') {
+        this._tutorialPendingAdvance = this._tutorialMetrics.deliveryDone;
+      } else if (step.id === 'capture') {
+        this._tutorialPendingAdvance = this.trilocks.some(base => base.faction === local.faction);
+      } else if (step.id === 'jobs') {
+        this._tutorialPendingAdvance = SANDBOX_JOB_ORDER.every(jobId => this._tutorialMetrics.usedJobs[jobId]);
+      } else if (step.id === 'alliance') {
+        this._tutorialPendingAdvance = !!this.alliance && this._tutorialMetrics.targetUsed;
+      } else if (step.id === 'chaos') {
+        if (this.chaosEvent) {
+          this.chaosEvent.remaining = Math.max(0, this.chaosEvent.remaining - dt);
+          const inside = Math.hypot(local.x - this.chaosEvent.x, local.y - this.chaosEvent.y) <= this.chaosEvent.radius;
+          this._tutorialPendingAdvance = !inside;
+          if (this.chaosEvent.remaining <= 0) this.chaosEvent = null;
+        }
+      }
+      return;
+    }
+
+    if (this._isPracticeMode()) {
+      const local = this.localPlayer;
+      if (!local) return;
+      local.energy = Math.min(100, local.energy + 18 * dt);
+      if (local.cooldown > 0) local.cooldown = Math.max(0, local.cooldown - dt * 1.35);
+    }
+  }
+
+  _spawnDamageNumber(x, y, value, color = '#ffd966') {
+    if (!this._isSandboxMode()) return;
+    this.damageNumbers.push({
+      x,
+      y,
+      value,
+      color,
+      ttl: 0.9,
+    });
+  }
+
+  switchLocalJob(jobId) {
+    if (!this._isSandboxMode() || !this.localPlayer || !JOBS[jobId]) return;
+    this.localPlayer.setJob(jobId, {
+      refillEnergy: true,
+      resetCooldowns: true,
+      preserveHealthRatio: false,
+    });
+    this.trainingMessage = `${JOBS[jobId].label.toUpperCase()} LINKED — Press Space to test ${this.localPlayer.abilityName.toUpperCase()}.`;
+    if (this.practiceState) this.practiceState.lastSwitchedJob = jobId;
+  }
+
+  advanceTutorial() {
+    if (!this.tutorial || !this._tutorialPendingAdvance) return;
+    if (this.tutorial.stepIndex >= TUTORIAL_STEPS.length - 1) {
+      this.tutorial.complete = true;
+      return;
+    }
+    this.tutorial.stepIndex += 1;
+    this._prepareTutorialStep();
+  }
+
+  skipTutorial() {
+    if (!this._isTutorialMode()) return;
+    this._transitionToMode('standard');
+  }
+
+  startMainMatchFromTutorial() {
+    if (!this.tutorial?.complete) return;
+    this._transitionToMode('standard');
+  }
+
+  _transitionToMode(mode) {
+    if (!MODE_RULES[mode]) return;
+    this.config.gameMode = mode;
+    this.modeRules = getModeRules(mode);
+    this.config.matchDuration = this.modeRules.matchDuration;
+    this.config.winScore = this.modeRules.winScore;
+    this.config.chaosEnabled = mode === 'standard';
+    this.config.chaosInterval = CHAOS_EVENT_INTERVAL;
+    if (mode === 'standard') this.config.startingCrystals = 'normal';
+    else if (this._isSandboxMode()) this.config.startingCrystals = 'low';
+    this.matchEnded = false;
+    this.winnerFaction = null;
+    this.victoryTimer = 0;
+    this.elapsed = 0;
+    this.events = [];
+    this.projectiles = [];
+    this.players = [];
+    this.crystals = [];
+    this.trilocks = [];
+    this.sparks = [];
+    this.rain = [];
+    this.dataStreams = [];
+    this.damageNumbers = [];
+    this.bases = {};
+    this.focusedEnemy = null;
+    this.rallySignal = null;
+    this.alliance = null;
+    this.spectatorMode = false;
+    this.spectatorCameraMode = 'overhead';
+    this.spectatorTarget = null;
+    this.minimapPins = [];
+    this.recentDeaths = [];
+    this.baseAttackAlerts = {
+      blue: { active: false, cooldown: 0 },
+      green: { active: false, cooldown: 0 },
+      red: { active: false, cooldown: 0 },
+    };
+    this._configureModeState();
+    this._spawn();
+    this.replay.beginRecording();
+  }
+
+  getGuideState() {
+    if (this._isTutorialMode()) {
+      const step = this._currentTutorialStep();
+      if (!step) return null;
+      const progress = this._getTutorialProgressText(step.id);
+      return {
+        visible: true,
+        mode: 'tutorial',
+        title: step.title,
+        body: step.body,
+        stepIndex: this.tutorial.stepIndex + 1,
+        stepCount: TUTORIAL_STEPS.length,
+        highlightIds: step.highlightIds ?? [],
+        progress,
+        showJobSwitcher: !!step.showJobSwitcher,
+        canAdvance: this._tutorialPendingAdvance,
+        advanceLabel: this.tutorial.complete ? 'START STANDARD MATCH' : 'NEXT STEP',
+        complete: this.tutorial.complete,
+      };
+    }
+    if (this._isPracticeMode()) {
+      return {
+        visible: true,
+        mode: 'practice',
+        title: 'PRACTICE MODE · SANDBOX',
+        body: this.trainingMessage || 'Switch jobs freely with the buttons or 1-4, then attack the dummy agents with Space. Respawns are unlimited and the match never times out.',
+        highlightIds: ['status-right'],
+        showJobSwitcher: true,
+      };
+    }
+    return null;
+  }
+
+  _getTutorialProgressText(stepId) {
+    if (stepId === 'movement') {
+      return `MOVE ${Math.min(120, Math.round(this._tutorialMetrics.movementDistance))}/120 · VIEW ${this._tutorialMetrics.spectatorUsed ? 'OK' : 'WAIT'} · CAMERA ${this._tutorialMetrics.cameraCycleUsed ? 'OK' : 'WAIT'}`;
+    }
+    if (stepId === 'crystal') {
+      return this._tutorialMetrics.deliveryDone ? 'DELIVERY COMPLETE' : 'DELIVER 1 CRYSTAL TO YOUR HOME BASE';
+    }
+    if (stepId === 'capture') {
+      return this.trilocks.some(base => base.faction === this.localPlayer?.faction)
+        ? 'TRILOCK CAPTURED'
+        : 'STAND INSIDE THE TRILOCK RING';
+    }
+    if (stepId === 'jobs') {
+      const done = SANDBOX_JOB_ORDER.filter(jobId => this._tutorialMetrics.usedJobs[jobId]).length;
+      return `JOBS TESTED ${done}/${SANDBOX_JOB_ORDER.length}`;
+    }
+    if (stepId === 'alliance') {
+      return this._tutorialMetrics.targetUsed ? 'TARGET PRIORITY CONFIRMED' : 'PRESS TAB AFTER THE ALLIANCE BANNER APPEARS';
+    }
+    if (stepId === 'chaos') {
+      return 'EXIT THE EMP STORM RING';
+    }
+    return '';
   }
 
   getObservedPlayer() {
@@ -855,9 +1479,19 @@ export class Game {
         player.alive = true;
         player.maxHealth = player.baseMaxHealth;
         player.health = player.maxHealth;
-        const base = this.bases[player.faction];
-        player.x = base.x + (Math.random() - 0.5) * 60;
-        player.y = base.y + (Math.random() - 0.5) * 60;
+        player.energy = 100;
+        player.cooldown = 0;
+        player.cooldown2 = 0;
+        player.ultCooldown = 0;
+        const point = this.getRespawnPoint(player);
+        if (point) {
+          player.x = point.x;
+          player.y = point.y;
+        } else {
+          const base = this.bases[player.faction];
+          player.x = base.x + (Math.random() - 0.5) * 60;
+          player.y = base.y + (Math.random() - 0.5) * 60;
+        }
         player.carrying = [];
       }
       return;
@@ -871,6 +1505,8 @@ export class Game {
       (player.passiveState?.speedMult ?? 1) *
       this._getGuardianBlessing(player.faction).speedMult;
     const effSpeed = player.speed * speedMult;
+    const prevX = player.x;
+    const prevY = player.y;
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy) || 1;
       player.vx = (dx / len) * effSpeed;
@@ -883,6 +1519,9 @@ export class Game {
     player.y += player.vy * dt;
     player.x = Math.max(PLAYER_RADIUS, Math.min(this.width - PLAYER_RADIUS, player.x));
     player.y = Math.max(PLAYER_RADIUS, Math.min(this.height - PLAYER_RADIUS, player.y));
+    if (this._isTutorialMode()) {
+      this._tutorialMetrics.movementDistance += Math.hypot(player.x - prevX, player.y - prevY);
+    }
     player._updateTrail();
 
     // Deliver jewels to any owned base (home or captured TriLock)
@@ -908,6 +1547,7 @@ export class Game {
         }
         this.scores[player.faction] += totalScore;
         this._recordCrystalDelivery(player, deliveredCount, totalScore);
+        if (this._isTutorialMode()) this._tutorialMetrics.deliveryDone = true;
         this.sparks.push(...Particle.ring(deliveryBase.x, deliveryBase.y, FACTIONS[player.faction].color, BASE_RADIUS * 0.55, {
           life: 0.85,
           growth: 150,
@@ -967,6 +1607,7 @@ export class Game {
           proj.owner?.markCombat(this.elapsed);
           p.markCombat(this.elapsed);
           p.health -= proj.damage;
+          this._spawnDamageNumber(p.x, p.y - 14, Math.round(proj.damage), FACTIONS[proj.faction].color);
           this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
           if (p.health <= 0) {
             this._recordElimination(p, proj.owner ?? proj.faction, 'ability KO');
@@ -1031,7 +1672,7 @@ export class Game {
   // ── Chaos Events ─────────────────────────────────────────────────────────
 
   _updateChaosEvents(dt) {
-    if (!this.config.chaosEnabled) return;
+    if (!this.config.chaosEnabled && !this.chaosEvent) return;
 
     // Tick active event
     if (this.chaosEvent) {
@@ -1054,7 +1695,7 @@ export class Game {
           faction: 'blue',
           ttl: 3,
         });
-        this.chaosEvent = null;
+        this._clearChaosEvent();
         this.chaosEventTimer = this.config.chaosInterval;
       }
       return;
@@ -1081,6 +1722,13 @@ export class Game {
       event.x = m + Math.random() * (this.width - m * 2);
       event.y = m + Math.random() * (this.height - m * 2);
       event.radius = 120 + Math.random() * 60;  // 120-180 px radius
+    } else if (spec.type === 'data_storm') {
+      const targetBase = this._setRandomHighValueBase();
+      if (targetBase) {
+        event.targetLabel = this._formatBaseLabel(targetBase);
+        event.description = `Minimap jammed. Cooldowns x1.5. ${event.targetLabel} pays x3.`;
+      }
+      this._stretchActiveCooldowns(1.5);
     }
 
     this.chaosEvent = event;
@@ -1114,10 +1762,55 @@ export class Game {
     this.stats[player.faction].abilitiesUsed++;
   }
 
-  _registerDamage(target, attacker) {
-    if (!target || !attacker) return;
+  _clearChaosEvent() {
+    this.chaosEvent = null;
+    this._clearHighValueBase();
+  }
+
+  _getAbilityCooldownMultiplier() {
+    return this.chaosEvent?.type === 'data_storm' ? 1.5 : 1;
+  }
+
+  _stretchActiveCooldowns(multiplier) {
+    for (const player of this.players) {
+      player.cooldown *= multiplier;
+      player.cooldown2 *= multiplier;
+      player.ultCooldown *= multiplier;
+    }
+  }
+
+  _clearHighValueBase() {
+    if (this.highValueBase) {
+      this.highValueBase.highValue = false;
+      this.highValueBase.highValueMultiplier = 1;
+    }
+    this.highValueBase = null;
+  }
+
+  _setRandomHighValueBase() {
+    this._clearHighValueBase();
+    const candidates = [
+      ...Object.values(this.bases),
+      ...this.trilocks.filter(base => !!base.faction),
+    ];
+    const target = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+    if (!target) return null;
+    target.highValue = true;
+    target.highValueMultiplier = 3;
+    this.highValueBase = target;
+    return target;
+  }
+
+  _formatBaseLabel(base) {
+    if (!base) return 'TARGET BASE';
+    if (base.isHome) return `${base.faction.toUpperCase()} HOME`;
+    return base.faction ? `${base.faction.toUpperCase()} TRILOCK` : 'TRILOCK';
+  }
+
+  _registerDamage(target, attackerFaction) {
+    if (!target || !attackerFaction) return;
     if (!this.damageLedger.has(target)) this.damageLedger.set(target, new Map());
-    this.damageLedger.get(target).set(attacker, this.elapsed);
+    this.damageLedger.get(target).set(attackerFaction, this.elapsed);
   }
 
   _recordElimination(victim, killerFaction, reason = 'eliminated') {
@@ -1202,6 +1895,7 @@ export class Game {
 
   _checkMatchEnd() {
     if (this.matchEnded) return;
+    if (this._isSandboxMode()) return;
 
     // Score-based match end (when winScore > 0 and a faction reaches it)
     if (this.config.winScore > 0) {
@@ -1224,7 +1918,7 @@ export class Game {
     }
 
     // Time-based match end — winner has the most points
-    if (this.matchTimer <= 0) {
+    if (Number.isFinite(this.matchTimer) && this.matchTimer <= 0) {
       this.matchEnded = true;
       const ranking = ['blue', 'green', 'red']
         .map(faction => ({ faction, score: this.scores[faction] ?? 0 }))
@@ -1277,7 +1971,7 @@ export class Game {
     };
 
     // Reset chaos events
-    this.chaosEvent = null;
+    this._clearChaosEvent();
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;
     this._crystalRainAccum = 0;
     this._resetNexusGuardian();
@@ -1574,6 +2268,7 @@ export class Game {
 
     if (this.input.target && !this._targetLatch) {
       this._targetLatch = true;
+      if (this._isTutorialMode()) this._tutorialMetrics.targetUsed = true;
       this._focusNearestEnemy();
     } else if (!this.input.target) {
       this._targetLatch = false;
@@ -1649,6 +2344,70 @@ export class Game {
     });
   }
 
+  _focusSpectatorCamera(x, y, zoom = this.spectatorCamera.zoom || 1) {
+    const safeZoom = Math.max(REPLAY_MIN_ZOOM, Math.min(REPLAY_MAX_ZOOM, zoom));
+    const halfW = this.width / (2 * safeZoom);
+    const halfH = this.height / (2 * safeZoom);
+    this.spectatorCamera.zoom = safeZoom;
+    this.spectatorCamera.x = Math.max(halfW, Math.min(this.width - halfW, x));
+    this.spectatorCamera.y = Math.max(halfH, Math.min(this.height - halfH, y));
+  }
+
+  _cycleSpectatorTarget(direction = 1) {
+    const alivePlayers = this.players.filter(player => player.alive);
+    if (!alivePlayers.length) {
+      this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+      return;
+    }
+    const currentIndex = alivePlayers.indexOf(this.spectatorTarget);
+    const nextIndex = direction === 0 || currentIndex < 0
+      ? 0
+      : (currentIndex + direction + alivePlayers.length) % alivePlayers.length;
+    this.spectatorTarget = alivePlayers[nextIndex];
+    if (this.spectatorCameraMode === 'follow' && this.spectatorTarget) {
+      this._focusSpectatorCamera(this.spectatorTarget.x, this.spectatorTarget.y, 1.35);
+    }
+  }
+
+  _cycleSpectatorCameraMode() {
+    if (!this.spectatorMode) return;
+    const modes = ['overhead', 'follow', 'free'];
+    const index = modes.indexOf(this.spectatorCameraMode);
+    this.spectatorCameraMode = modes[(index + 1 + modes.length) % modes.length];
+    this.events.push({
+      text: `👁️ Camera ${this.spectatorCameraMode.toUpperCase()}`,
+      faction: 'blue',
+      ttl: 2,
+    });
+    this._updateSpectatorState(0);
+  }
+
+  _updateSpectatorState(dt) {
+    if (!this.spectatorMode) return;
+    if (this.spectatorCameraMode === 'overhead') {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+      return;
+    }
+    if (this.spectatorCameraMode === 'follow') {
+      const target = this.spectatorTarget?.alive ? this.spectatorTarget : this.localPlayer;
+      if (target) this._focusSpectatorCamera(target.x, target.y, 1.35);
+      return;
+    }
+    const panSpeed = REPLAY_PAN_SPEED / (this.spectatorCamera.zoom || 1);
+    const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+    const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    const zoomDelta = ((this.input.zoomIn ? 1 : 0) - (this.input.zoomOut ? 1 : 0)) * dt * REPLAY_ZOOM_RATE;
+    const nextZoom = Math.max(
+      REPLAY_MIN_ZOOM,
+      Math.min(REPLAY_MAX_ZOOM, this.spectatorCamera.zoom + zoomDelta),
+    );
+    this._focusSpectatorCamera(
+      this.spectatorCamera.x + dx * panSpeed * dt,
+      this.spectatorCamera.y + dy * panSpeed * dt,
+      nextZoom,
+    );
+  }
+
   resetReplayCamera() {
     this.camera.x = this.width / 2;
     this.camera.y = this.height / 2;
@@ -1668,6 +2427,62 @@ export class Game {
     const halfH = this.height / (2 * this.camera.zoom);
     this.camera.x = Math.max(halfW, Math.min(this.width - halfW, this.camera.x));
     this.camera.y = Math.max(halfH, Math.min(this.height - halfH, this.camera.y));
+  }
+
+  _focusSpectatorCamera(x, y, zoom = 1) {
+    this.spectatorCamera.x = x;
+    this.spectatorCamera.y = y;
+    this.spectatorCamera.zoom = zoom;
+  }
+
+  _cycleSpectatorTarget(direction = 1) {
+    const alivePlayers = this.players.filter(player => player.alive);
+    if (alivePlayers.length === 0) {
+      this.spectatorTarget = this.localPlayer ?? null;
+      return;
+    }
+    const currentIndex = Math.max(0, alivePlayers.indexOf(this.spectatorTarget));
+    const nextIndex = ((currentIndex + direction) % alivePlayers.length + alivePlayers.length) % alivePlayers.length;
+    this.spectatorTarget = alivePlayers[nextIndex] ?? alivePlayers[0];
+  }
+
+  _cycleSpectatorCameraMode() {
+    if (!this.spectatorMode) return;
+    const modes = ['overhead', 'follow', 'free'];
+    const currentIndex = Math.max(0, modes.indexOf(this.spectatorCameraMode));
+    this.spectatorCameraMode = modes[(currentIndex + 1) % modes.length];
+  }
+
+  _updateSpectatorState(dt) {
+    if (!this.spectatorMode) {
+      this.spectatorTarget = this.localPlayer ?? this.spectatorTarget;
+      return;
+    }
+
+    if (!this.spectatorTarget?.alive) this._cycleSpectatorTarget(1);
+    if (this.spectatorCameraMode === 'overhead') {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+      return;
+    }
+    if (this.spectatorCameraMode === 'follow') {
+      const target = this.spectatorTarget ?? this.localPlayer;
+      if (target) this._focusSpectatorCamera(target.x, target.y, 1.2);
+      return;
+    }
+
+    const zoom = this.spectatorCamera.zoom || 1;
+    const panSpeed = REPLAY_PAN_SPEED / zoom;
+    const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+    const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    this.spectatorCamera.x += dx * panSpeed * dt;
+    this.spectatorCamera.y += dy * panSpeed * dt;
+    if (this.input.zoomIn) this.spectatorCamera.zoom = Math.min(REPLAY_MAX_ZOOM, zoom + dt * REPLAY_ZOOM_RATE);
+    if (this.input.zoomOut) this.spectatorCamera.zoom = Math.max(REPLAY_MIN_ZOOM, zoom - dt * REPLAY_ZOOM_RATE);
+
+    const halfW = this.width / (2 * this.spectatorCamera.zoom);
+    const halfH = this.height / (2 * this.spectatorCamera.zoom);
+    this.spectatorCamera.x = Math.max(halfW, Math.min(this.width - halfW, this.spectatorCamera.x || this.width / 2));
+    this.spectatorCamera.y = Math.max(halfH, Math.min(this.height - halfH, this.spectatorCamera.y || this.height / 2));
   }
 
   _playerId(player) {
@@ -1732,12 +2547,14 @@ export class Game {
           x: round(base.x),
           y: round(base.y),
           shieldPulse: round(base.shieldPulse),
-          crystalsStored: base.crystalsStored,
-          isHome: base.isHome,
-          captureProgress: round(base.captureProgress ?? 0),
-          captureFaction: base.captureFaction,
-          level: base.level ?? 0,
-        }]),
+        crystalsStored: base.crystalsStored,
+        isHome: base.isHome,
+        captureProgress: round(base.captureProgress ?? 0),
+        captureFaction: base.captureFaction,
+        level: base.level ?? 0,
+        highValue: !!base.highValue,
+        highValueMultiplier: base.highValueMultiplier ?? 1,
+      }]),
       ),
       trilocks: this.trilocks.map(tl => ({
         faction: tl.faction,
@@ -1749,6 +2566,8 @@ export class Game {
         captureProgress: round(tl.captureProgress ?? 0),
         captureFaction: tl.captureFaction,
         level: tl.level ?? 0,
+        highValue: !!tl.highValue,
+        highValueMultiplier: tl.highValueMultiplier ?? 1,
       })),
       players: this.players.map(player => ({
         faction: player.faction,
@@ -1820,6 +2639,7 @@ export class Game {
       members: [...frame.alliance.members],
       target: frame.alliance.target,
     } : null;
+    this._clearHighValueBase();
     this.chaosEvent = frame.chaosEvent ? { ...frame.chaosEvent } : null;
     this.factionBuffs = Object.fromEntries(
       Object.entries(frame.factionBuffs ?? {}).map(([faction, buff]) => [faction, { ...buff }]),
@@ -1841,6 +2661,10 @@ export class Game {
       if (!trilock) return;
       Object.assign(trilock, snapshot);
     });
+    this.highValueBase = [
+      ...Object.values(this.bases),
+      ...this.trilocks,
+    ].find(base => base.highValue) ?? null;
 
     this.players.forEach(player => {
       player.carrying = [];
