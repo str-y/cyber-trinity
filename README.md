@@ -1,31 +1,153 @@
-# CYBER TRINITY — 5v5v5 Data-Node Combat
+# CYBER TRINITY — Battle Trinity 3-Team Jewel Combat
 
-An Unreal Engine 5 game set in a rain-soaked, neon-lit cyberpunk datacenter city.  
-Rendered with **Lumen** global illumination, **Nanite** virtualized geometry,  
+A cyberpunk 3-team real-time territory control action game inspired by
+Dragon Quest X's "Battle Trinity". Set in a rain-soaked, neon-lit datacenter city,
+rendered with **Lumen** global illumination, **Nanite** virtualized geometry,
 volumetric fog, and cinematic post-process.
+
+---
+
+## Class Structure Diagram
+
+```
+Game (world state, update loop)
+ ├── Base (TriLock)
+ │    ├─ faction: string | null     ← owning faction or neutral
+ │    ├─ isHome: boolean            ← true for spawn bases (un-capturable)
+ │    ├─ captureProgress: 0–100     ← current capture meter
+ │    ├─ captureFaction: string     ← who is capturing
+ │    ├─ level: 0–3                 ← delivery bonus ×1 / ×1.25 / ×1.5
+ │    ├─ tryCapture(counts, dt)     ← resolve capture per frame
+ │    └─ deliverJewel(value) → score
+ │
+ ├── Player (Agent)
+ │    ├─ faction: string            ← blue / green / red
+ │    ├─ job: string                ← warrior / mage / healer / scout
+ │    ├─ carrying: Jewel[]          ← up to 5 jewels
+ │    ├─ skills[0]: primary         ← Power Slash / Railshot / Bio Shield / Quick Dash
+ │    ├─ skills[1]: secondary       ← War Cry / Ice Wall / Purify / Smoke Bomb
+ │    ├─ ultimate                   ← Blade Storm / Meteor Strike / Sanctuary / Shadow Step
+ │    ├─ role: string               ← collector / fighter / defender (AI)
+ │    ├─ tryAbility(world)          ← fire primary skill → Projectile
+ │    └─ dropAllJewels(world)       ← death penalty
+ │
+ ├── MemoryCrystal (Jewel)
+ │    ├─ tier: normal / rare / legendary
+ │    ├─ value: 5 / 15 / 25
+ │    └─ tierColor: hex             ← visual colour per tier
+ │
+ ├── Projectile                     ← ability effects (railshot / bioshield / powerdash / …)
+ ├── Particle                       ← visual sparks
+ └── RainDrop                       ← ambient rain
+```
+
+### Inheritance / Composition
+
+- `Game` owns arrays of `Base`, `Player`, `MemoryCrystal`, `Projectile`, `Particle`, `RainDrop`.
+- `Player.carrying` is an array of `MemoryCrystal` references (max 5).
+- `Base.tryCapture()` is called by `Game._updateTriLocks()` each frame.
+- `Player.tryAbility()` creates and returns a `Projectile`.
+
+---
+
+## Game Rules (Battle Trinity)
+
+| Rule | Detail |
+|------|--------|
+| **Teams** | Standard: 3 teams × 5 agents (5v5v5) / Quick Match: 3 teams × 2 agents (2v2v2) |
+| **Match length** | Standard: 5 minutes / Quick Match: 3 minutes |
+| **Victory** | Standard: first to 150 points (or highest score at time-up) / Quick Match: first to 80 points |
+| **Jewel delivery** | Pick up jewels → deliver to any owned base (home or captured TriLock) |
+| **TriLock capture** | Stand inside a neutral/enemy TriLock to capture it; contested = no progress |
+| **Death penalty** | On death, drop ALL carried jewels on the ground |
+| **Hate control** | AI fighters bias toward the leading team; HUD highlights 1st place |
 
 ---
 
 ## Factions
 
-| Colour | Name | Role | Base |
-|--------|------|------|------|
-| 🔵 Blue  | **The Archive**      | Data Sniper   | Animated server rack — energy rifle snipers on high ground |
-| 🟢 Green | **Life Forge**       | Bio Guard     | Bionic tree — shield-wall warriors, close-range AoE heal |
-| 🔴 Red   | **Core Protocol**    | Core Striker  | Furnace core — power-fist dash, highest movement speed |
+| Colour | Name | Role | Passive | Base |
+|--------|------|------|---------|------|
+| 🔵 Blue  | **The Archive**      | Data Sniper   | **Data Cache** — owned-base deliveries +20%, wider minimap scan | Animated server rack — energy rifle snipers on high ground |
+| 🟢 Green | **Life Forge**       | Bio Guard     | **Bio Regen** — 5% max HP/s after 5s out of combat, adjacent ally grants +15% max HP | Bionic tree — shield-wall warriors, close-range AoE heal |
+| 🔴 Red   | **Core Protocol**    | Core Striker  | **Overclock** — kills bank -2s next ability cooldown (max 3), sprint speed +10% | Furnace core — power-fist dash, highest movement speed |
+
+---
+
+## Job System
+
+Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Scout, Warrior):
+
+| Job | Emoji | Speed | HP | Skills | Ultimate |
+|-----|-------|-------|----|--------|----------|
+| **Warrior** | ⚔️ | 72 | 130 | Power Slash (30 dmg), War Cry (buff) | Blade Storm (45 dmg) |
+| **Mage** | 🔮 | 55 | 80 | Railshot (35 dmg), Ice Wall (zone) | Meteor Strike (50 dmg) |
+| **Healer** | 💚 | 60 | 100 | Bio Shield (heal aura), Purify (cleanse) | Sanctuary (mass heal) |
+| **Scout** | 💨 | 95 | 85 | Quick Dash (20 dmg), Smoke Bomb (stealth) | Shadow Step (30 dmg) |
+
+---
+
+## Jewel Value Tiers
+
+| Tier | Value | Colour | Spawn Zone | Weight |
+|------|-------|--------|------------|--------|
+| **Normal** | 5 pts | 💠 Blue | Entire field | 60% |
+| **Rare** | 15 pts | 💜 Purple | Inner 50% | 30% |
+| **Legendary** | 25 pts | 🌟 Gold | Centre 30% | 10% |
+
+- Higher-value jewels spawn closer to the centre of the map.
+- Every 20 seconds a bonus Rare or Legendary jewel appears at the centre.
+- Delivery score is multiplied by the TriLock's level bonus (Lv1 ×1, Lv2 ×1.25, Lv3 ×1.5).
+
+---
+
+## TriLock Capture Logic (Sample)
+
+```javascript
+// Base.tryCapture(counts, dt)
+// counts = { blue: N, green: N, red: N } — alive players in range per faction
+//
+// 1. If 2+ factions present → contested, no progress
+// 2. If attacker ≠ current owner → decay existing progress (slower at higher levels)
+// 3. If decay reaches 0 → base becomes neutral
+// 4. If attacker == captureFaction → build progress at CAPTURE_SPEED × count × dt
+// 5. When progress reaches CAPTURE_MAX (100) → base claimed by attacker
+//
+// Tuning constants:
+//   CAPTURE_RANGE = BASE_RADIUS + 20 px
+//   CAPTURE_SPEED = 20 progress/s per player
+//   CAPTURE_MAX   = 100
+//   Level decay defense = 1 + (level × 0.5)
+```
+
+---
+
+## Scoring
+
+| Action | Points |
+|--------|--------|
+| Normal Jewel delivery (Lv1 base) | +5 |
+| Rare Jewel delivery (Lv1 base) | +15 |
+| Legendary Jewel delivery (Lv1 base) | +25 |
+| Delivery × Lv2 bonus (×1.25) | e.g. +6 / +19 / +31 |
+| Delivery × Lv3 bonus (×1.5) | e.g. +8 / +23 / +38 |
+| Eliminate enemy agent | +5 |
+| Assist (damage within 5 s) | +2 |
 
 ---
 
 ## Mechanics
 
-- **15 agents** compete simultaneously (5v5v5).
-- **Memory Crystals** (`AMemoryCrystal`) — glowing polyhedra scattered across the field.  
-  Agents pick them up and deliver them to their faction's **Data Node** (`ADataNode`) for **+10 points**.
+- **Two playable rule sets** — Standard runs at 5v5v5, while Quick Match compresses the loop into 2v2v2.
+- **Jewels** (`MemoryCrystal`) — value-tiered glowing polyhedra scattered across the field.
+  Agents pick them up (carry up to 5) and deliver them to an owned base for points.
+- **TriLock bases** — Standard uses 5 neutral bases in a ring; Quick Match uses 3 bases in a compact triangle.
+  Capture by standing in range; level up through deliveries.
+- **Death penalty** — killed agents drop ALL carried jewels on the ground.
+- **Hate control** — AI fighters target the leading team 60% of the time.
 - **Combat scoring**: defeating an enemy agent grants **+5 points**, and recent damage contributors receive an **assist +2 points**.
-- Each Data Node is protected by an animated **holographic shield dome** (Niagara).
-- Nodes are connected by animated **network-link splines** with travelling data-stream particles.
-- Pre-seeded match scores: **Archive 30 · Life Forge 85 · Core Protocol 55**.
-- When any faction reaches the score limit (200), the match ends and a scoreboard overlay shows kills / deaths / assists / crystal pickups.
+- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload, and Data Storm.
+- **Feature contracts** chain: Overclock Uplink → Deploy Firewall → Core Meltdown.
 
 ---
 
@@ -97,38 +219,32 @@ python3 -m http.server 8080
 
 Controls (browser preview):
 
-- `W/A/S/D` or Arrow keys: move the local blue agent (`YOU`)
-- `Space`: activate faction ability (Railshot) when charged
+- Choose your starting faction on the launch screen before deploying.
+- `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
+- `Space`: activate job ability (Warrior: Power Slash) when charged
+- `Tab`: lock the nearest enemy and show a direction indicator / target marker
+- `E`: manually drop one carried jewel for tactical hand-offs
+- `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
+- `V`: toggle spectator mode at any time during the match
+- `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
+- `[` / `]`: switch the followed- `R`: enter replay mode after a match ends
+- `L`: load a saved replay file
+- `Space`: play/pause replay playback
+- `[` / `]`: seek backward/forward 5 seconds in replay
+- Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
+- Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time
 
 ---
 
-## Next Task
 ## AI Roles
 
-Each faction's 5 agents are assigned specialised roles that govern their behaviour:
+Each faction's 5 agents are assigned specialised roles based on their job class:
 
-| Role | Count | Behaviour |
-|------|-------|-----------|
-| **Collector** | ×2 | Crystal retrieval specialist — strongly prefers picking up Memory Crystals and delivering them to base. Very low aggro. |
-| **Fighter** | ×2 | Enemy elimination specialist — seeks out and attacks enemy agents, pushes toward enemy bases. Ignores crystals. |
-| **Defender** | ×1 | Base patrol guard — stays within a patrol radius around the faction's base, engages intruders, and picks up nearby crystals. |
-
-Role assignment is based on the agent index (0–4) within each faction:
-indices 0–1 → Collector, indices 2–3 → Fighter, index 4 → Defender.
-
----
-
-## 次の機能に必要なもの
-
-Bring the **Unreal `GameState` implementation** up to parity with the browser
-preview's full feature-contract chain.
-
-- Add contracts #2 and #3 after **Activate Overclock Uplink** (currently only one
-  contract is tracked in UE).
-- Replicate current contract progress/status so HUD/Blueprint can show
-  who/when/what and completion state.
-- Keep completion effects aligned with the browser contract flow (score bonus +
-  event feed updates per contract).
+| Job | Role | Behaviour |
+|-----|------|-----------|
+| **Scout / Healer** | Collector | Jewel retrieval specialist — strongly prefers picking up jewels and delivering them. |
+| **Warrior (idx 0) / Mage** | Fighter | Enemy elimination specialist — seeks out and attacks enemy agents. Biased toward the leading team (hate control). |
+| **Warrior (idx 4)** | Defender | Base patrol guard — stays within patrol radius, engages intruders, grabs nearby jewels. |
 
 ---
 
@@ -148,32 +264,32 @@ Once all three contracts are fulfilled the panel reads **ALL CONTRACTS FULFILLED
 
 ---
 
-## Faction Abilities
+## Chaos Events
 
-Each faction has a unique active ability triggered by AI agents when their cooldown
-is ready and enough energy is available.
+| Event | Duration | Effect |
+|-------|----------|--------|
+| ⚡ **EMP Storm** | 8 s | Energy regen disabled in a random zone |
+| 💎 **Crystal Rain** | 15 s | Bonus jewels spawn every 1.5 s |
+| 💥 **Nexus Overload** | 8 s | All base shields down |
 
-| Faction | Ability | Effect | Cost | Cooldown |
-|---------|---------|--------|------|----------|
-| 🔵 The Archive | **Railshot** | Fast long-range energy bolt, 35 damage | 25 energy | 6 s |
-| 🟢 Life Forge | **Bio Shield** | Stationary heal aura, restores 15 HP/s to nearby allies for 2.5 s | 35 energy | 6 s |
-| 🔴 Core Protocol | **Power Dash** | Blazing charge toward nearest enemy, 25 damage | 30 energy | 6 s |
-
-Energy regenerates at 8 per second (max 100). Abilities appear in the event feed
-and are visible as canvas effects in the browser preview.
+Events fire every 30 seconds (first after 15 s delay).
 
 ---
 
 ## HUD Layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ [Faction Legend]    [ARCHIVE 30 | LIFE FORGE 85 | CORE PROTOCOL 55] │ ← top
-│                                              [💎 Crystals on field] │
-│                                              [Event feed…         ] │ ← right
-│                                                                      │
-│ [AGENT STATUS                  ]  [ABILITY — RAILSHOT             ] │ ← bottom
-│   ❤ Health  ████████░░  180/200   🎯 Charge  ██████░░░░  75%        │
-│   ⚡ Energy  ██████████  100/100   ⏱ Cooldown ██░░░░░░░░  2.1s      │
-└─────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│ [Faction Legend]    [ARCHIVE 0 | LIFE FORGE 0 | CORE PROTOCOL 0]          │ ← top
+│                              [ 4:32 ]                                     │ ← match timer
+│                                                    [💎 Jewels on field]   │
+│                                                    [Event feed…         ] │ ← right
+│                                                                           │
+│  TriLock Lv2 (blue)    TriLock (neutral)    TriLock Lv1 (red)             │ ← field
+│                                                                           │
+│ [AGENT STATUS — WARRIOR       ]  [ABILITY — POWER SLASH               ]  │ ← bottom
+│   ❤ Health  ████████░░  130/130   🎯 Charge  ██████░░░░  75%             │
+│   ⚡ Energy  ██████████  100/100   ⏱ Cooldown ██░░░░░░░░  2.1s           │
+│   💎 Jewels  2 / 5                                                        │
+└───────────────────────────────────────────────────────────────────────────┘
 ```

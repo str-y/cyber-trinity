@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CYBER TRINITY — 5v5v5 Data-Node Combat</title>
+  <title>CYBER TRINITY — Battle Trinity 3-Team Jewel Combat</title>
   <link rel="stylesheet" href="styles/main.css" />
 </head>
 <body>
@@ -12,34 +12,24 @@
     <!-- Main render surface -->
     <canvas id="game-canvas"></canvas>
 
-    <!-- Faction selection screen -->
-    <div id="faction-select">
-      <div class="fs-title">CHOOSE YOUR FACTION</div>
-      <div class="fs-cards">
-        <button class="fs-card" data-faction="blue">
-          <span class="fs-emoji">🔵</span>
-          <span class="fs-name blue">THE ARCHIVE</span>
-          <span class="fs-role">Data Sniper</span>
-          <span class="fs-tagline">Knowledge &amp; Order</span>
-          <span class="fs-stats">SPD 55 · AGR 0.55</span>
-          <span class="fs-ability">⚡ Railshot</span>
-        </button>
-        <button class="fs-card" data-faction="green">
-          <span class="fs-emoji">🟢</span>
-          <span class="fs-name green">LIFE FORGE</span>
-          <span class="fs-role">Bio Guard</span>
-          <span class="fs-tagline">Life &amp; Harmony</span>
-          <span class="fs-stats">SPD 62 · AGR 0.45</span>
-          <span class="fs-ability">🛡️ Bio Shield</span>
-        </button>
-        <button class="fs-card" data-faction="red">
-          <span class="fs-emoji">🔴</span>
-          <span class="fs-name red">CORE PROTOCOL</span>
-          <span class="fs-role">Core Striker</span>
-          <span class="fs-tagline">Force &amp; Chaos</span>
-          <span class="fs-stats">SPD 85 · AGR 0.85</span>
-          <span class="fs-ability">💨 Power Dash</span>
-        </button>
+    <!-- Lobby screen (shown first) -->
+    <div id="lobby-screen"></div>
+
+    <!-- Faction selection (shown after lobby) -->
+    <div id="faction-select-screen" style="display:none">
+      <div id="faction-select-panel">
+        <div class="select-kicker">CHOOSE YOUR FACTION</div>
+        <h1>CYBER TRINITY</h1>
+        <div id="faction-options"></div>
+        <button id="deploy-button" type="button">DEPLOY AGENT</button>
+      </div>
+    </div>
+
+    <!-- 3-second countdown overlay -->
+    <div id="countdown-overlay" style="display:none">
+      <div id="countdown-inner">
+        <div id="countdown-number">3</div>
+        <div id="countdown-label">DEPLOYING AGENT…</div>
       </div>
     </div>
 
@@ -51,6 +41,9 @@
 
       <!-- Faction legend — top left -->
       <div id="faction-legend"></div>
+
+      <!-- Minimap controls -->
+      <div id="minimap-controls"></div>
 
       <!-- Team scores — top centre -->
       <div id="score-panel"></div>
@@ -64,6 +57,9 @@
       <!-- Chaos event banner — top centre below scores -->
       <div id="chaos-event-banner"></div>
 
+      <!-- Alliance indicator — below chaos banner -->
+      <div id="alliance-indicator"></div>
+
       <!-- Kill / event feed — below top-right -->
       <div id="event-feed"></div>
 
@@ -72,6 +68,9 @@
 
       <!-- Ability / cooldown — bottom right -->
       <div id="status-right"></div>
+
+      <!-- Spectator overlay -->
+      <div id="spectator-panel"></div>
 
       <!-- Match-end scoreboard -->
       <div id="match-scoreboard"></div>
@@ -82,17 +81,59 @@
 
   <script type="module">
     import { Game } from './src/game.js';
+    import { FACTIONS } from './src/entities.js';
     const canvas = document.getElementById('game-canvas');
-    const game   = new Game(canvas);
-    const selectScreen = document.getElementById('faction-select');
+    import { initLobby } from './src/lobby.js';
 
-    document.querySelectorAll('.fs-card').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const faction = btn.dataset.faction;
-        selectScreen.style.display = 'none';
-        game.start(faction);
-      });
+    const lobbyScreen  = document.getElementById('lobby-screen');
+    const factionScreen = document.getElementById('faction-select-screen');
+    const countdownOverlay = document.getElementById('countdown-overlay');
+    const countdownNumber  = document.getElementById('countdown-number');
+    const options      = document.getElementById('faction-options');
+    const deployButton = document.getElementById('deploy-button');
+    let selectedFaction = 'blue';
+
+    // ── Faction selection rendering ────────────────────────────────────────
+    const renderOptions = () => {
+      options.innerHTML = Object.values(FACTIONS).map((faction) => `
+        <button
+          type="button"
+          class="faction-card ${faction.id}${faction.id === selectedFaction ? ' selected' : ''}"
+          data-faction="${faction.id}">
+          <div class="faction-card-header">
+            <span>${faction.emoji} ${faction.name}</span>
+            <span>${faction.role}</span>
+          </div>
+          <div class="faction-card-passive">PASSIVE — ${faction.passive.name}</div>
+          <div class="faction-card-detail">${faction.passive.details.join('</div><div class="faction-card-detail">')}</div>
+        </button>
+      `).join('');
+    };
+
+    options.addEventListener('click', (event) => {
+      const card = event.target.closest('[data-faction]');
+      if (!card) return;
+      selectedFaction = card.dataset.faction;
+      renderOptions();
     });
+
+    // ── Lobby init ────────────────────────────────────────────────────────
+    const lobby = initLobby(
+      { lobbyScreen, factionScreen, countdownOverlay, countdownNumber },
+      (config) => {
+        // Called after countdown: start the game with lobby config
+        const game = new Game(canvas, { ...config, playerFaction: config.playerFaction });
+        window.cyberTrinityGame = game;
+        game.start();
+      },
+    );
+
+    // ── Deploy button: starts 3-second countdown ──────────────────────────
+    deployButton.addEventListener('click', () => {
+      lobby.startCountdown(selectedFaction);
+    });
+
+    renderOptions();
   </script>
 </body>
 </html>
