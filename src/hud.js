@@ -820,8 +820,9 @@ export class HUD {
     const completeBody = guide.complete
       ? 'Tutorial complete. Start a full standard match with your current faction selection whenever you are ready.'
       : guide.body;
+    const guideModeLabel = guide.mode ? guide.mode.toUpperCase() : 'GUIDE';
     this._modeGuideEl.innerHTML = `
-      <div class="mode-guide-kicker">${guide.mode.toUpperCase()}</div>
+      <div class="mode-guide-kicker">${guideModeLabel}</div>
       <div class="mode-guide-title">${guide.title}</div>
       ${guide.stepIndex ? `<div class="mode-guide-step">STEP ${guide.stepIndex} / ${guide.stepCount}</div>` : ''}
       <div class="mode-guide-body">${completeBody}</div>
@@ -843,7 +844,7 @@ export class HUD {
     };
     this._jobSwitcherEl.style.display = 'flex';
     this._jobSwitcherEl.innerHTML = `
-      <div class="mode-job-title">JOB LINKER</div>
+      <div class="mode-job-title">JOB SWITCHER</div>
       <div class="mode-job-buttons">
         ${Object.entries(jobLabels).map(([job, label], index) => `
           <button type="button" class="mode-job-btn${currentJob === job ? ' active' : ''}" data-job="${job}">

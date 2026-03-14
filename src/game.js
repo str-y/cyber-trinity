@@ -675,7 +675,7 @@ export class Game {
     if (this._isPracticeMode()) {
       const cx = this.width / 2;
       const cy = this.height / 2;
-      const rareTier = JEWEL_TIERS.find(tier => tier.tier === 'rare') ?? JEWEL_TIERS[1];
+      const rareTier = JEWEL_TIERS.find(tier => tier.tier === 'rare') ?? JEWEL_TIERS[0];
       this.crystals.push(
         new MemoryCrystal(cx, cy + 40, JEWEL_TIERS[0]),
         new MemoryCrystal(cx - 120, cy + 65, JEWEL_TIERS[0]),
@@ -1244,9 +1244,10 @@ export class Game {
     this.modeRules = getModeRules(mode);
     this.config.matchDuration = this.modeRules.matchDuration;
     this.config.winScore = this.modeRules.winScore;
-    this.config.chaosEnabled = mode === 'standard' ? true : mode === 'quick' ? this.config.chaosEnabled : false;
+    this.config.chaosEnabled = mode === 'standard';
     this.config.chaosInterval = CHAOS_EVENT_INTERVAL;
-    this.config.startingCrystals = mode === 'standard' ? 'normal' : this._isSandboxMode() ? 'low' : this.config.startingCrystals;
+    if (mode === 'standard') this.config.startingCrystals = 'normal';
+    else if (this._isSandboxMode()) this.config.startingCrystals = 'low';
     this.matchEnded = false;
     this.winnerFaction = null;
     this.victoryTimer = 0;

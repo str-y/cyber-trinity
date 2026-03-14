@@ -684,7 +684,8 @@ export class Renderer {
     ctx.fillStyle = 'rgba(216,236,255,0.8)';
     ctx.font = 'bold 9px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`${local.abilityName.toUpperCase()} RANGE`, local.x, local.y - ABILITY_RANGE - 10);
+    const abilityLabel = local.abilityName ? local.abilityName.toUpperCase() : 'ABILITY';
+    ctx.fillText(`${abilityLabel} RANGE`, local.x, local.y - ABILITY_RANGE - 10);
     ctx.restore();
   }
 
@@ -1205,10 +1206,14 @@ export class Renderer {
   // ── Match timer (centre top, rendered on canvas for visibility) ────────
 
   _drawMatchTimer(world, W, H) {
-    const text = Number.isFinite(world.matchTimer ?? 0)
-      ? `${Math.floor(Math.max(0, world.matchTimer ?? 0) / 60)}:${Math.floor(Math.max(0, world.matchTimer ?? 0) % 60).toString().padStart(2, '0')}`
+    const finiteTimer = Number.isFinite(world.matchTimer ?? 0);
+    const safeTimer = finiteTimer ? Math.max(0, world.matchTimer ?? 0) : 999;
+    const mins = Math.floor(safeTimer / 60);
+    const secs = Math.floor(safeTimer % 60);
+    const text = finiteTimer
+      ? `${mins}:${secs.toString().padStart(2, '0')}`
       : (world.config?.gameMode === 'tutorial' ? 'TUTORIAL' : 'FREEPLAY');
-    const t = Number.isFinite(world.matchTimer ?? 0) ? Math.max(0, world.matchTimer ?? 0) : 999;
+    const t = safeTimer;
 
     const ctx = this.ctx;
     ctx.save();

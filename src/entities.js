@@ -378,7 +378,9 @@ export class Player {
     this.aggro = jobDef.aggro;
     this.baseMaxHealth = jobDef.maxHealth;
     this.maxHealth = jobDef.maxHealth;
-    this.health = Math.max(1, Math.round(jobDef.maxHealth * healthRatio));
+    this.health = this.alive === false
+      ? 0
+      : Math.max(1, Math.round(jobDef.maxHealth * healthRatio));
 
     const primary = jobDef.skills[0];
     this.abilityName = primary.name;
