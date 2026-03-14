@@ -1653,8 +1653,8 @@ export class Game {
 
   _focusSpectatorCamera(x, y, zoom = this.spectatorCamera.zoom || 1) {
     const safeZoom = Math.max(REPLAY_MIN_ZOOM, Math.min(REPLAY_MAX_ZOOM, zoom));
-    const halfW = this.width / (2 * safeZoom || 2);
-    const halfH = this.height / (2 * safeZoom || 2);
+    const halfW = this.width / (2 * safeZoom);
+    const halfH = this.height / (2 * safeZoom);
     this.spectatorCamera.zoom = safeZoom;
     this.spectatorCamera.x = Math.max(halfW, Math.min(this.width - halfW, x));
     this.spectatorCamera.y = Math.max(halfH, Math.min(this.height - halfH, y));
@@ -1703,11 +1703,15 @@ export class Game {
     const panSpeed = REPLAY_PAN_SPEED / (this.spectatorCamera.zoom || 1);
     const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    const zoomDelta = ((this.input.zoomIn ? 1 : 0) - (this.input.zoomOut ? 1 : 0)) * dt * REPLAY_ZOOM_RATE;
+    const nextZoom = Math.max(
+      REPLAY_MIN_ZOOM,
+      Math.min(REPLAY_MAX_ZOOM, this.spectatorCamera.zoom + zoomDelta),
+    );
     this._focusSpectatorCamera(
       this.spectatorCamera.x + dx * panSpeed * dt,
       this.spectatorCamera.y + dy * panSpeed * dt,
-      this.spectatorCamera.zoom +
-        ((this.input.zoomIn ? 1 : 0) - (this.input.zoomOut ? 1 : 0)) * dt * REPLAY_ZOOM_RATE,
+      nextZoom,
     );
   }
 
