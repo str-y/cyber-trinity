@@ -12,6 +12,7 @@ import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS,
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
+import { ReplayManager } from './replay.js';
 
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 12;
@@ -25,6 +26,13 @@ const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
+const REPLAY_DEFAULT_ZOOM = 1.2;
+const REPLAY_MIN_ZOOM = 1;
+const REPLAY_MAX_ZOOM = 2.5;
+const REPLAY_ZOOM_RATE = 1.2;
+const REPLAY_PAN_SPEED = 320;
+const REPLAY_TRAIL_HISTORY_LENGTH = 8;
+
 const CAMERA_ZOOM_THRESHOLD = 1.001;
 const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
 const BASE_ALERT_RANGE = BASE_RADIUS + 84;
@@ -140,8 +148,10 @@ export class Game {
     this.renderer = new Renderer(canvas);
     this.hud      = new HUD();
     this.audio    = new AudioEngine();
+    this.replay   = new ReplayManager(this);
     this.running  = false;
     this._lastTs  = 0;
+    this._lastDt  = 0;
     this.playerFaction = options.playerFaction ?? 'blue';
 
     // ── Lobby config (all settings from the pre-match lobby) ───────────────
@@ -209,6 +219,8 @@ export class Game {
       target: false,
       drop: false,
       rally: false,
+      zoomIn: false,
+      zoomOut: false,
     };
     this._abilityLatch = false;
     this._targetLatch = false;
@@ -216,6 +228,7 @@ export class Game {
     this._rallyLatch = false;
     this.focusedEnemy = null;
     this.rallySignal = null;
+    this.camera = { x: 0, y: 0, zoom: 1 };
     this.minimapPins = [];
     this.recentDeaths = [];
     this.baseAttackAlerts = {
@@ -250,6 +263,7 @@ export class Game {
     this._resize();
     window.addEventListener('resize', () => this._resize());
     this._spawn();
+    this.replay.beginRecording();
     this.running = true;
     requestAnimationFrame(ts => this._loop(ts));
   }
@@ -258,6 +272,7 @@ export class Game {
     this.width  = window.innerWidth;
     this.height = window.innerHeight;
     this.renderer.resize(this.width, this.height);
+    if (!this.camera.x && !this.camera.y) this.resetReplayCamera();
 
     // Reposition bases on resize
     if (Object.keys(this.bases).length > 0) {
@@ -325,6 +340,7 @@ export class Game {
 
     // ── Data stream particles ─────────────────────────────────────────────
     this._initDataStreams();
+    this.resetReplayCamera();
   }
 
   _bindInput() {
@@ -337,13 +353,17 @@ export class Game {
       if (code === 'Tab') this.input.target = down;
       if (code === 'KeyE') this.input.drop = down;
       if (code === 'KeyQ') this.input.rally = down;
+      if (code === 'Equal' || code === 'NumpadAdd') this.input.zoomIn = down;
+      if (code === 'Minus' || code === 'NumpadSubtract') this.input.zoomOut = down;
       return (
         code === 'KeyW' || code === 'ArrowUp' ||
         code === 'KeyS' || code === 'ArrowDown' ||
         code === 'KeyA' || code === 'ArrowLeft' ||
         code === 'KeyD' || code === 'ArrowRight' ||
         code === 'Space' || code === 'Tab' ||
-        code === 'KeyE' || code === 'KeyQ'
+        code === 'KeyE' || code === 'KeyQ' ||
+        code === 'Equal' || code === 'NumpadAdd' ||
+        code === 'Minus' || code === 'NumpadSubtract'
       );
     };
     window.addEventListener('keydown', e => {
@@ -530,6 +550,7 @@ export class Game {
     if (!this.running) return;
     const dt = Math.min((ts - this._lastTs) / 1000, 0.05);
     this._lastTs = ts;
+    this._lastDt = dt;
 
     this._update(dt);
     this.renderer.render(this, dt);
@@ -541,9 +562,14 @@ export class Game {
   // ── Update ────────────────────────────────────────────────────────────────
 
   _update(dt) {
+    if (this.replay.isActive) {
+      this._updateReplayCamera(dt);
+      this.replay.update(dt);
+      return;
+    }
     if (this.matchEnded) {
       this.victoryTimer -= dt;
-      if (this.victoryTimer <= 0) this._restart();
+      if (!this.replay.hasReplay && this.victoryTimer <= 0) this._restart();
       return;
     }
     this.elapsed += dt;
@@ -720,6 +746,7 @@ export class Game {
 
     this._updateSpectatorState(dt);
     this._checkMatchEnd();
+    this.replay.recordFrame();
   }
 
   getObservedPlayer() {
@@ -1086,10 +1113,12 @@ export class Game {
         faction: this.winnerFaction,
         ttl: 5,
       });
+      this.replay.finalizeRecording();
     }
   }
 
   _restart() {
+    this.replay.reset();
     // Reset scores and stats
     for (const faction of ['blue', 'green', 'red']) {
       this.scores[faction] = 0;
@@ -1179,6 +1208,8 @@ export class Game {
     // Reset jewels (value-tiered)
     this.crystals = [];
     this._spawnInitialJewels();
+    this.resetReplayCamera();
+    this.replay.beginRecording();
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────
@@ -1492,6 +1523,278 @@ export class Game {
     });
   }
 
+  resetReplayCamera() {
+    this.camera.x = this.width / 2;
+    this.camera.y = this.height / 2;
+    this.camera.zoom = REPLAY_DEFAULT_ZOOM;
+  }
+
+  _updateReplayCamera(dt) {
+    const panSpeed = REPLAY_PAN_SPEED / this.camera.zoom;
+    const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+    const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    this.camera.x += dx * panSpeed * dt;
+    this.camera.y += dy * panSpeed * dt;
+    if (this.input.zoomIn) this.camera.zoom = Math.min(REPLAY_MAX_ZOOM, this.camera.zoom + dt * REPLAY_ZOOM_RATE);
+    if (this.input.zoomOut) this.camera.zoom = Math.max(REPLAY_MIN_ZOOM, this.camera.zoom - dt * REPLAY_ZOOM_RATE);
+
+    const halfW = this.width / (2 * this.camera.zoom);
+    const halfH = this.height / (2 * this.camera.zoom);
+    this.camera.x = Math.max(halfW, Math.min(this.width - halfW, this.camera.x));
+    this.camera.y = Math.max(halfH, Math.min(this.height - halfH, this.camera.y));
+  }
+
+  _playerId(player) {
+    return player ? `${player.faction}:${player.index}` : null;
+  }
+
+  _findPlayerById(id) {
+    if (!id) return null;
+    return this.players.find(player => `${player.faction}:${player.index}` === id) ?? null;
+  }
+
+  captureReplayFrame() {
+    const round = ReplayManager.round;
+    return {
+      elapsed: round(this.elapsed),
+      matchTimer: round(this.matchTimer),
+      matchEnded: this.matchEnded,
+      winnerFaction: this.winnerFaction,
+      victoryTimer: round(this.victoryTimer),
+      scores: { ...this.scores },
+      stats: JSON.parse(JSON.stringify(this.stats)),
+      alliance: this.alliance ? {
+        members: [...this.alliance.members],
+        target: this.alliance.target,
+      } : null,
+      chaosEvent: this.chaosEvent ? {
+        ...this.chaosEvent,
+        remaining: round(this.chaosEvent.remaining ?? 0),
+        x: round(this.chaosEvent.x ?? 0),
+        y: round(this.chaosEvent.y ?? 0),
+        radius: round(this.chaosEvent.radius ?? 0),
+      } : null,
+      factionBuffs: Object.fromEntries(
+        Object.entries(this.factionBuffs).map(([faction, buff]) => [faction, {
+          ...buff,
+          timer: round(buff.timer ?? 0),
+        }]),
+      ),
+      featureIndex: this.featureIndex,
+      featureContracts: this.featureContracts.map(contract => ({
+        actor: contract.actor,
+        triggerScore: contract.triggerScore,
+        action: contract.action,
+        bonusScore: contract.bonusScore,
+        visualDuration: contract.visualDuration,
+        buff: contract.buff ? { ...contract.buff } : null,
+        completed: contract.completed,
+        visualTimer: round(contract.visualTimer ?? 0),
+      })),
+      localPlayerId: this._playerId(this.localPlayer),
+      focusedEnemyId: this._playerId(this.focusedEnemy),
+      rallySignal: this.rallySignal ? {
+        ...this.rallySignal,
+        x: round(this.rallySignal.x),
+        y: round(this.rallySignal.y),
+        radius: round(this.rallySignal.radius),
+        timer: round(this.rallySignal.timer),
+      } : null,
+      bases: Object.fromEntries(
+        Object.entries(this.bases).map(([faction, base]) => [faction, {
+          faction: base.faction,
+          x: round(base.x),
+          y: round(base.y),
+          shieldPulse: round(base.shieldPulse),
+          crystalsStored: base.crystalsStored,
+          isHome: base.isHome,
+          captureProgress: round(base.captureProgress ?? 0),
+          captureFaction: base.captureFaction,
+          level: base.level ?? 0,
+        }]),
+      ),
+      trilocks: this.trilocks.map(tl => ({
+        faction: tl.faction,
+        x: round(tl.x),
+        y: round(tl.y),
+        shieldPulse: round(tl.shieldPulse),
+        crystalsStored: tl.crystalsStored,
+        isHome: tl.isHome,
+        captureProgress: round(tl.captureProgress ?? 0),
+        captureFaction: tl.captureFaction,
+        level: tl.level ?? 0,
+      })),
+      players: this.players.map(player => ({
+        faction: player.faction,
+        index: player.index,
+        x: round(player.x),
+        y: round(player.y),
+        vx: round(player.vx),
+        vy: round(player.vy),
+        alive: player.alive,
+        respawnTimer: round(player.respawnTimer ?? 0),
+        health: round(player.health),
+        maxHealth: player.maxHealth,
+        energy: round(player.energy),
+        cooldown: round(player.cooldown ?? 0),
+        cooldown2: round(player.cooldown2 ?? 0),
+        ultCooldown: round(player.ultCooldown ?? 0),
+        state: player.state,
+        role: player.role,
+        target: player.target ? { x: round(player.target.x), y: round(player.target.y) } : null,
+        trailPoints: player.trailPoints.slice(-REPLAY_TRAIL_HISTORY_LENGTH).map(point => ({
+          x: round(point.x),
+          y: round(point.y),
+          a: round(point.a ?? 1, 3),
+        })),
+        carrying: [],
+      })),
+      crystals: this.crystals.map(crystal => ({
+        x: round(crystal.x),
+        y: round(crystal.y),
+        radius: crystal.radius,
+        pulse: round(crystal.pulse ?? 0),
+        rotAngle: round(crystal.rotAngle ?? 0),
+        pickupLockTimer: round(crystal.pickupLockTimer ?? 0),
+        pickupLockOwner: this._playerId(crystal.pickupLockOwner),
+        tier: crystal.tier,
+        value: crystal.value,
+        tierColor: crystal.tierColor,
+        delivered: crystal.delivered,
+        carrier: this._playerId(crystal.carrier),
+      })),
+      projectiles: this.projectiles.map(projectile => ({
+        x: round(projectile.x),
+        y: round(projectile.y),
+        vx: round(projectile.vx),
+        vy: round(projectile.vy),
+        faction: projectile.faction,
+        type: projectile.type,
+        damage: projectile.damage,
+        radius: projectile.radius,
+        life: round(projectile.life ?? 0),
+        maxLife: round(projectile.maxLife ?? 0),
+      })),
+    };
+  }
+
+  restoreReplayFrame(frame) {
+    if (!frame) return;
+    this.elapsed = frame.elapsed ?? 0;
+    this.matchTimer = frame.matchTimer ?? MATCH_DURATION;
+    this.matchEnded = !!frame.matchEnded;
+    this.winnerFaction = frame.winnerFaction ?? null;
+    this.victoryTimer = frame.victoryTimer ?? 0;
+    this.scores = { ...frame.scores };
+    this.stats = JSON.parse(JSON.stringify(frame.stats));
+    this.events = [];
+    this.alliance = frame.alliance ? {
+      members: [...frame.alliance.members],
+      target: frame.alliance.target,
+    } : null;
+    this.chaosEvent = frame.chaosEvent ? { ...frame.chaosEvent } : null;
+    this.factionBuffs = Object.fromEntries(
+      Object.entries(frame.factionBuffs ?? {}).map(([faction, buff]) => [faction, { ...buff }]),
+    );
+    this.featureIndex = frame.featureIndex ?? 0;
+    this.featureContracts = (frame.featureContracts ?? []).map(contract => ({
+      ...contract,
+      buff: contract.buff ? { ...contract.buff } : null,
+    }));
+
+    for (const [faction, snapshot] of Object.entries(frame.bases ?? {})) {
+      const base = this.bases[faction];
+      if (!base) continue;
+      Object.assign(base, snapshot);
+    }
+
+    frame.trilocks?.forEach((snapshot, index) => {
+      const trilock = this.trilocks[index];
+      if (!trilock) return;
+      Object.assign(trilock, snapshot);
+    });
+
+    this.players.forEach(player => {
+      player.carrying = [];
+    });
+    frame.players?.forEach(snapshot => {
+      const player = this.players.find(candidate =>
+        candidate.faction === snapshot.faction && candidate.index === snapshot.index,
+      );
+      if (!player) return;
+      player.x = snapshot.x;
+      player.y = snapshot.y;
+      player.vx = snapshot.vx;
+      player.vy = snapshot.vy;
+      player.alive = snapshot.alive;
+      player.respawnTimer = snapshot.respawnTimer;
+      player.health = snapshot.health;
+      player.maxHealth = snapshot.maxHealth;
+      player.energy = snapshot.energy;
+      player.cooldown = snapshot.cooldown;
+      player.cooldown2 = snapshot.cooldown2;
+      player.ultCooldown = snapshot.ultCooldown;
+      player.state = snapshot.state;
+      player.role = snapshot.role;
+      player.target = snapshot.target ? { ...snapshot.target } : null;
+      player.trailPoints = (snapshot.trailPoints ?? []).map(point => ({ ...point }));
+    });
+
+    this.crystals = (frame.crystals ?? []).map(snapshot => ({
+      ...snapshot,
+      carrier: null,
+      pickupLockOwner: null,
+    }));
+    this.crystals.forEach(crystal => {
+      crystal.carrier = this._findPlayerById(crystal.carrier);
+      crystal.pickupLockOwner = this._findPlayerById(crystal.pickupLockOwner);
+      if (crystal.carrier) crystal.carrier.carrying.push(crystal);
+    });
+
+    this.projectiles = (frame.projectiles ?? []).map(projectile => ({ ...projectile }));
+    this.focusedEnemy = this._findPlayerById(frame.focusedEnemyId);
+    this.localPlayer = this._findPlayerById(frame.localPlayerId) ?? this.players.find(p => p.faction === 'blue') ?? null;
+    this.rallySignal = frame.rallySignal ? { ...frame.rallySignal } : null;
+  }
+
+  startReplayPlayback() {
+    this.replay.enterPlayback();
+  }
+
+  toggleReplayPlayback() {
+    this.replay.togglePlayback();
+  }
+
+  setReplayTime(time) {
+    this.replay.seek(time);
+  }
+
+  setReplaySpeed(speed) {
+    this.replay.setPlaybackSpeed(speed);
+  }
+
+  exitReplayPlayback() {
+    this.replay.exitPlayback();
+  }
+
+  exportReplayFile() {
+    const payload = this.replay.exportReplay();
+    if (!payload) return;
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    link.href = url;
+    link.download = `cyber-trinity-replay-${stamp}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  restartLiveMatch() {
+    this.exitReplayPlayback();
+    this._restart();
+  }
+
   _toggleSpectatorMode() {
     this.spectatorMode = !this.spectatorMode;
     this.focusedEnemy = null;
@@ -1756,7 +2059,7 @@ export class Game {
       this._nexusGuardianAttack(playersInArena);
     }
 
-    if (guardian.health <= 0) this._defeatNexusGuardian();
+  }
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────

@@ -16,6 +16,7 @@ export class HUD {
     this._scoreEls   = {};
     this._feedItems  = [];
     this._scoreboardEl = null;
+    this._replayControlsBound = false;
     this._minimapFilters = {
       agents: { blue: true, green: true, red: true },
       crystals: true,
@@ -229,6 +230,32 @@ export class HUD {
         <div class="scoreboard-row"><span class="blue">THE ARCHIVE</span><span id="sb-blue-kills">0</span><span id="sb-blue-deaths">0</span><span id="sb-blue-assists">0</span><span id="sb-blue-crystals">0</span><span id="sb-blue-score">0</span></div>
         <div class="scoreboard-row"><span class="green">LIFE FORGE</span><span id="sb-green-kills">0</span><span id="sb-green-deaths">0</span><span id="sb-green-assists">0</span><span id="sb-green-crystals">0</span><span id="sb-green-score">0</span></div>
         <div class="scoreboard-row"><span class="red">CORE PROTOCOL</span><span id="sb-red-kills">0</span><span id="sb-red-deaths">0</span><span id="sb-red-assists">0</span><span id="sb-red-crystals">0</span><span id="sb-red-score">0</span></div>
+        <div class="replay-panel" id="replay-panel">
+          <div class="panel-title blue">MATCH REPLAY</div>
+          <div class="replay-actions">
+            <button type="button" id="replay-toggle">PLAY REPLAY</button>
+            <button type="button" id="replay-export">EXPORT JSON</button>
+            <button type="button" id="replay-exit">LIVE RESULT</button>
+            <button type="button" id="replay-restart">NEW MATCH</button>
+          </div>
+          <div class="replay-timeline-row">
+            <span id="replay-current-time">0:00</span>
+            <input type="range" id="replay-timeline" min="0" max="0" step="0.1" value="0" />
+            <span id="replay-duration">0:00</span>
+          </div>
+          <div class="replay-meta">
+            <label for="replay-speed">SPD</label>
+            <select id="replay-speed">
+              <option value="0.25">0.25×</option>
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+            </select>
+            <span id="replay-status">Replay saved automatically after the match.</span>
+          </div>
+          <div class="replay-hint">Replay spectator camera: WASD/Arrows pan, +/- zoom, slider to seek.</div>
+        </div>
       `;
       this._scoreboardEl = scoreboard;
     }
@@ -250,6 +277,7 @@ export class HUD {
   // ── Per-frame update ─────────────────────────────────────────────────────
 
   update(world) {
+    this._bindReplayControls(world);
     // Scores — highlight leading faction
     const leadFaction = world._leadingFaction?.();
     for (const [f, el] of Object.entries(this._scoreEls)) {
@@ -344,6 +372,28 @@ export class HUD {
     this._updateChaosEvent(world);
     this._updateScoreboard(world);
     this._updateMinimapStatus(world);
+  }
+
+  _bindReplayControls(world) {
+    if (this._replayControlsBound) return;
+    const toggle = document.getElementById('replay-toggle');
+    const exportBtn = document.getElementById('replay-export');
+    const restart = document.getElementById('replay-restart');
+    const exit = document.getElementById('replay-exit');
+    const timeline = document.getElementById('replay-timeline');
+    const speed = document.getElementById('replay-speed');
+    if (!toggle || !exportBtn || !restart || !exit || !timeline || !speed) return;
+
+    toggle.addEventListener('click', () => world.toggleReplayPlayback());
+    exportBtn.addEventListener('click', () => world.exportReplayFile());
+    restart.addEventListener('click', () => world.restartLiveMatch());
+    exit.addEventListener('click', () => world.exitReplayPlayback());
+    timeline.addEventListener('input', event => {
+      if (!world.replay?.isActive) world.startReplayPlayback();
+      world.setReplayTime(event.target.value);
+    });
+    speed.addEventListener('change', event => world.setReplaySpeed(event.target.value));
+    this._replayControlsBound = true;
   }
 
   _setBar(id, value, max, numText) {
@@ -543,19 +593,22 @@ export class HUD {
 
   _updateScoreboard(world) {
     if (!this._scoreboardEl) return;
-    const visible = !!world.matchEnded;
+    const replayState = world.replay?.getHudState?.() ?? { available: false, active: false };
+    const finalReplayFrame = world.replay?.savedReplay?.frames?.at?.(-1) ?? null;
+    const summaryWorld = replayState.active && finalReplayFrame ? finalReplayFrame : world;
+    const visible = !!world.matchEnded || replayState.active;
     this._scoreboardEl.style.display = visible ? 'flex' : 'none';
     if (!visible) return;
 
     const winner = document.getElementById('scoreboard-winner');
     if (winner) {
-      const winnerFaction = world.winnerFaction ? world.winnerFaction.toUpperCase() : 'UNKNOWN';
+      const winnerFaction = summaryWorld.winnerFaction ? summaryWorld.winnerFaction.toUpperCase() : 'UNKNOWN';
       winner.textContent = `${winnerFaction} VICTORY`;
     }
 
     for (const faction of ['blue', 'green', 'red']) {
-      const stats = world.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
-      const score = world.scores[faction] ?? 0;
+      const stats = summaryWorld.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
+      const score = summaryWorld.scores[faction] ?? 0;
       const set = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.textContent = String(val);
@@ -566,6 +619,43 @@ export class HUD {
       set(`sb-${faction}-crystals`, stats.crystals);
       set(`sb-${faction}-score`, score);
     }
+
+    const replayPanel = document.getElementById('replay-panel');
+    const replayToggle = document.getElementById('replay-toggle');
+    const replayExit = document.getElementById('replay-exit');
+    const replayExport = document.getElementById('replay-export');
+    const replayTimeline = document.getElementById('replay-timeline');
+    const replaySpeed = document.getElementById('replay-speed');
+    const replayCurrent = document.getElementById('replay-current-time');
+    const replayDuration = document.getElementById('replay-duration');
+    const replayStatus = document.getElementById('replay-status');
+    if (!replayPanel || !replayToggle || !replayExit || !replayExport ||
+        !replayTimeline || !replaySpeed || !replayCurrent || !replayDuration || !replayStatus) return;
+
+    replayPanel.style.display = replayState.available ? 'flex' : 'none';
+    replayToggle.disabled = !replayState.available;
+    replayExport.disabled = !replayState.available;
+    replayExit.disabled = !replayState.active;
+    replayTimeline.disabled = !replayState.available;
+    replaySpeed.disabled = !replayState.available;
+    replayToggle.textContent = replayState.active
+      ? (replayState.playing ? 'PAUSE REPLAY' : 'RESUME REPLAY')
+      : 'PLAY REPLAY';
+    replayTimeline.max = String(replayState.duration || 0);
+    replayTimeline.value = String(replayState.time || 0);
+    replaySpeed.value = String(replayState.speed || 1);
+    replayCurrent.textContent = this._formatReplayTime(replayState.time || 0);
+    replayDuration.textContent = this._formatReplayTime(replayState.duration || 0);
+    replayStatus.textContent = replayState.available
+      ? `${replayState.storedFrames} recorded frames ready${replayState.active ? ' — replay mode active' : ''}.`
+      : 'Replay becomes available when the match ends.';
+  }
+
+  _formatReplayTime(seconds) {
+    const total = Math.max(0, Number(seconds) || 0);
+    const mins = Math.floor(total / 60);
+    const secs = Math.floor(total % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
   _updateSpectator(world) {

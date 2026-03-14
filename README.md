@@ -227,8 +227,10 @@ Controls (browser preview):
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
 - `V`: toggle spectator mode at any time during the match
 - `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
-- `[` / `]`: switch the followed agent while spectating
-- `W/A/S/D` or Arrow keys in `FREE` spectator camera: pan the camera without affecting the match
+- `[` / `]`: switch the followed- `R`: enter replay mode after a match ends
+- `L`: load a saved replay file
+- `Space`: play/pause replay playback
+- `[` / `]`: seek backward/forward 5 seconds in replay
 - Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
 - Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time
 

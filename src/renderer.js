@@ -63,6 +63,9 @@ export class Renderer {
     // ── Rain ───────────────────────────────────────────────────────────────
     this._drawRain(world.rain);
 
+    ctx.save();
+    this._applyReplayCamera(world, W, H);
+
     // ── Puddle / wet-floor reflections ─────────────────────────────────────
     this._drawReflections(world, W, H);
 
@@ -123,13 +126,23 @@ export class Renderer {
     this._drawMatchTimer(world, W, H);
 
     // ── Victory overlay ────────────────────────────────────────────────────
-    if (world.matchEnded) this._drawVictoryOverlay(world);
+    if (world.matchEnded && !world.replay?.isActive) this._drawVictoryOverlay(world);
 
     // ── Vignette / atmospheric overlay ─────────────────────────────────────
     this._drawVignette(W, H);
 
     // ── Minimap ────────────────────────────────────────────────────────────
     this._drawMinimap(world, W, H);
+  }
+
+  _applyReplayCamera(world, W, H) {
+    if (!world.replay?.isActive) return;
+    const zoom = world.camera?.zoom ?? 1;
+    const cx = world.camera?.x ?? W / 2;
+    const cy = world.camera?.y ?? H / 2;
+    this.ctx.translate(W / 2, H / 2);
+    this.ctx.scale(zoom, zoom);
+    this.ctx.translate(-cx, -cy);
   }
 
   _applyCamera(camera, W, H) {
@@ -157,8 +170,6 @@ export class Renderer {
       y: ((y - bounds.y) / bounds.height) * world.height,
     };
   }
-}
-
   // ── Grid ──────────────────────────────────────────────────────────────────
 
   _drawGrid(W, H) {
@@ -1018,11 +1029,14 @@ export class Renderer {
     ctx.fillStyle   = `rgba(255,255,255,0.85)`;
     ctx.fillText(f.name.toUpperCase(), W / 2, H / 2 + 30);
 
-    // Restart countdown
+    // Post-match status
     ctx.shadowBlur  = 0;
     ctx.font        = `${Math.min(W * 0.025, 20)}px "Courier New", monospace`;
     ctx.fillStyle   = 'rgba(255,255,255,0.55)';
-    ctx.fillText(`Restarting in ${Math.ceil(Math.max(0, t))}s`, W / 2, H / 2 + 70);
+    const statusText = world.replay?.hasReplay
+      ? 'Replay ready — use the timeline controls below'
+      : `Restarting in ${Math.ceil(Math.max(0, t))}s`;
+    ctx.fillText(statusText, W / 2, H / 2 + 70);
 
     ctx.restore();
   }
