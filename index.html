@@ -12,6 +12,16 @@
     <!-- Main render surface -->
     <canvas id="game-canvas"></canvas>
 
+    <!-- Faction selection -->
+    <div id="faction-select-screen">
+      <div id="faction-select-panel">
+        <div class="select-kicker">CHOOSE YOUR FACTION</div>
+        <h1>CYBER TRINITY</h1>
+        <div id="faction-options"></div>
+        <button id="deploy-button" type="button">DEPLOY AGENT</button>
+      </div>
+    </div>
+
     <!-- Holographic HUD overlay -->
     <div id="hud">
 
@@ -54,9 +64,44 @@
 
   <script type="module">
     import { Game } from './src/game.js';
+    import { FACTIONS } from './src/entities.js';
+
     const canvas = document.getElementById('game-canvas');
-    const game   = new Game(canvas);
-    game.start();
+    const screen = document.getElementById('faction-select-screen');
+    const options = document.getElementById('faction-options');
+    const deployButton = document.getElementById('deploy-button');
+    let selectedFaction = 'blue';
+
+    const renderOptions = () => {
+      options.innerHTML = Object.values(FACTIONS).map((faction) => `
+        <button
+          type="button"
+          class="faction-card ${faction.id}${faction.id === selectedFaction ? ' selected' : ''}"
+          data-faction="${faction.id}">
+          <div class="faction-card-header">
+            <span>${faction.emoji} ${faction.name}</span>
+            <span>${faction.role}</span>
+          </div>
+          <div class="faction-card-passive">PASSIVE — ${faction.passive.name}</div>
+          <div class="faction-card-detail">${faction.passive.details.join('</div><div class="faction-card-detail">')}</div>
+        </button>
+      `).join('');
+    };
+
+    options.addEventListener('click', (event) => {
+      const card = event.target.closest('[data-faction]');
+      if (!card) return;
+      selectedFaction = card.dataset.faction;
+      renderOptions();
+    });
+
+    deployButton.addEventListener('click', () => {
+      const game = new Game(canvas, { playerFaction: selectedFaction });
+      screen.style.display = 'none';
+      game.start();
+    }, { once: true });
+
+    renderOptions();
   </script>
 </body>
 </html>

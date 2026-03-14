@@ -1027,10 +1027,17 @@ export class Renderer {
     const y0     = H - mapH - ABILITY_PANEL_CLEARANCE;
     const wW     = world.width;
     const wH     = world.height;
+    const local  = world.localPlayer;
+    const visionRadius = local?.passiveState?.minimapVisionRadius ?? 240;
 
     // Map world coordinates → minimap pixel coordinates
     const mx = (wx) => x0 + (wx / wW) * mapW;
     const my = (wy) => y0 + (wy / wH) * mapH;
+    const isVisible = (wx, wy, faction = null) => {
+      if (!local?.alive) return true;
+      if (faction === local.faction) return true;
+      return Math.hypot(wx - local.x, wy - local.y) <= visionRadius;
+    };
 
     ctx.save();
 
@@ -1061,6 +1068,7 @@ export class Renderer {
     // ── TriLock bases (medium dots) ──────────────────────────────────────
     if (world.trilocks) {
       for (const tl of world.trilocks) {
+        if (!isVisible(tl.x, tl.y, tl.faction)) continue;
         const color = tl.faction ? FACTIONS[tl.faction].color : '#666677';
         const { r, g, b } = hexToRgb(color);
         ctx.fillStyle  = `rgba(${r},${g},${b},0.75)`;
@@ -1076,6 +1084,7 @@ export class Renderer {
     const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
     for (const crystal of world.crystals) {
       if (crystal.delivered) continue;
+      if (!isVisible(crystal.x, crystal.y)) continue;
       const tColor = crystal.tierColor ?? '#a0d4ff';
       const { r, g, b } = hexToRgb(tColor);
       ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
@@ -1089,6 +1098,7 @@ export class Renderer {
     // ── Agents (small faction-coloured dots) ──────────────────────────────
     for (const player of world.players) {
       if (!player.alive) continue;
+      if (!isVisible(player.x, player.y, player.faction)) continue;
       const f = FACTIONS[player.faction];
       const { r, g, b } = hexToRgb(f.color);
       ctx.fillStyle  = `rgba(${r},${g},${b},0.95)`;
@@ -1109,6 +1119,14 @@ export class Renderer {
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('MAP', x0 + 4, y0 + 3);
+    if (local?.alive) {
+      const revealRadius = (visionRadius / wW) * mapW;
+      ctx.strokeStyle = withAlpha(FACTIONS[local.faction].color, 0.5);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(mx(local.x), my(local.y), Math.max(10, revealRadius), 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }

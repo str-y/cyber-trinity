@@ -33,6 +33,114 @@ html, body {
   background: #05080f;
 }
 
+#faction-select-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top, rgba(74, 168, 255, 0.14), transparent 40%),
+    rgba(1, 6, 18, 0.82);
+  backdrop-filter: blur(8px);
+  z-index: 20;
+}
+
+#faction-select-panel {
+  width: min(920px, calc(100vw - 48px));
+  padding: 22px 24px;
+  border: 1px solid rgba(100, 180, 255, 0.35);
+  border-radius: 10px;
+  background: rgba(0, 10, 30, 0.86);
+  box-shadow: 0 0 28px rgba(74, 168, 255, 0.15);
+}
+
+#faction-select-panel h1 {
+  font-size: 28px;
+  letter-spacing: 4px;
+  margin-bottom: 18px;
+  color: #d8ecff;
+}
+
+.select-kicker {
+  font-size: 10px;
+  letter-spacing: 4px;
+  color: rgba(160, 212, 255, 0.75);
+  margin-bottom: 8px;
+}
+
+#faction-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.faction-card {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.faction-card:hover,
+.faction-card.selected {
+  transform: translateY(-2px);
+}
+
+.faction-card.blue.selected {
+  border-color: rgba(74, 168, 255, 0.8);
+  box-shadow: 0 0 16px rgba(74, 168, 255, 0.18);
+}
+
+.faction-card.green.selected {
+  border-color: rgba(80, 255, 120, 0.8);
+  box-shadow: 0 0 16px rgba(80, 255, 120, 0.18);
+}
+
+.faction-card.red.selected {
+  border-color: rgba(255, 68, 68, 0.8);
+  box-shadow: 0 0 16px rgba(255, 68, 68, 0.18);
+}
+
+.faction-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.faction-card-passive {
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.75;
+  margin-bottom: 8px;
+}
+
+.faction-card-detail {
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.88;
+}
+
+#deploy-button {
+  margin-top: 18px;
+  padding: 10px 18px;
+  border: 1px solid rgba(160, 212, 255, 0.45);
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(74, 168, 255, 0.2), rgba(74, 168, 255, 0.05));
+  color: #d8ecff;
+  font: inherit;
+  letter-spacing: 3px;
+  cursor: pointer;
+}
+
 /* ── Holographic HUD overlay ── */
 #hud {
   position: absolute;
@@ -176,6 +284,42 @@ html, body {
   width: 36px;
   text-align: right;
   opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+#passive-state {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.passive-summary {
+  font-size: 10px;
+  letter-spacing: 1px;
+  opacity: 0.9;
+}
+
+.passive-row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.passive-icon {
+  text-align: center;
+}
+
+.passive-label {
+  opacity: 0.55;
+  font-size: 9px;
+  letter-spacing: 2px;
+}
+
+.passive-value {
+  color: #d8ecff;
   font-variant-numeric: tabular-nums;
 }
 
@@ -498,4 +642,10 @@ html, body {
 @keyframes hateGlow {
   from { filter: brightness(1); }
   to   { filter: brightness(1.5) drop-shadow(0 0 6px currentColor); }
+}
+
+@media (max-width: 900px) {
+  #faction-options {
+    grid-template-columns: 1fr;
+  }
 }

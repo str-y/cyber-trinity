@@ -5,6 +5,8 @@
  * jewel counter, TriLock status, hate indicator.
  */
 
+import { FACTIONS } from './entities.js';
+
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
 
@@ -71,7 +73,7 @@ export class HUD {
 
     const statusLeft = document.getElementById('status-left');
     statusLeft.innerHTML = `
-      <div class="panel-title blue">AGENT STATUS — <span id="job-label">WARRIOR</span></div>
+      <div class="panel-title blue" id="status-title">AGENT STATUS — <span id="job-label">WARRIOR</span></div>
       ${this._barRow('❤️', 'HEALTH', 'health',  '130 / 130', 100, 'health')}
       ${this._barRow('⚡', 'ENERGY', 'energy',  '100 / 100', 100, 'energy')}
       <div class="stat-row" style="margin-top:2px">
@@ -79,13 +81,15 @@ export class HUD {
         <div class="stat-label">JEWELS</div>
         <div class="stat-num" id="carry-count" style="width:auto;font-size:11px;color:#ffd700">0 / 5</div>
       </div>
+      <div class="panel-title blue" id="passive-title">PASSIVE — DATA CACHE</div>
+      <div id="passive-state"></div>
     `;
 
     // ── Right status (ability / cooldown) ─────────────────────────────────
 
     const statusRight = document.getElementById('status-right');
     statusRight.innerHTML = `
-      <div class="panel-title blue">ABILITY — <span id="ability-label">POWER SLASH</span></div>
+      <div class="panel-title blue" id="ability-title">ABILITY — <span id="ability-label">POWER SLASH</span></div>
       ${this._barRow('🎯', 'CHARGE', 'ability', '100%', 100, 'ability')}
       ${this._barRow('⏱', 'COOLDOWN', 'cooldown', '0.0s', 0, 'cooldown')}
     `;
@@ -186,8 +190,17 @@ export class HUD {
     }
 
     // First blue player as "local player"
-    const local = world.players.find(p => p.faction === 'blue');
+    const local = world.localPlayer;
     if (local) {
+      const statusTitle = document.getElementById('status-title');
+      if (statusTitle) statusTitle.className = `panel-title ${local.faction}`;
+      const abilityTitle = document.getElementById('ability-title');
+      if (abilityTitle) abilityTitle.className = `panel-title ${local.faction}`;
+      const passiveTitle = document.getElementById('passive-title');
+      if (passiveTitle) {
+        passiveTitle.className = `panel-title ${local.faction}`;
+        passiveTitle.textContent = `PASSIVE — ${(local.passive?.name ?? 'NONE').toUpperCase()}`;
+      }
       this._setBar('health', local.health, local.maxHealth,
         `${Math.round(local.health)} / ${local.maxHealth}`);
       this._setBar('energy', local.energy, 100,
@@ -211,6 +224,8 @@ export class HUD {
       // Ability label
       const abilityLabel = document.getElementById('ability-label');
       if (abilityLabel) abilityLabel.textContent = (local.abilityName ?? 'SKILL').toUpperCase();
+
+      this._updatePassive(local);
     }
 
     // Jewel counter
@@ -302,6 +317,53 @@ export class HUD {
         ? 'feature-status-completed'
         : 'feature-status-pending';
     }
+  }
+
+  _updatePassive(local) {
+    const passiveEl = document.getElementById('passive-state');
+    if (!passiveEl) return;
+
+    const def = FACTIONS[local.faction];
+    const state = local.passiveState ?? {};
+    let rows = [];
+
+    if (local.passive?.id === 'data-cache') {
+      const deliveryPct = Math.round(((local.passive.deliveryBonusMult ?? 1) - 1) * 100);
+      rows = [
+        this._passiveRow('📦', 'BASE BONUS', state.deliveryBonusActive ? `ACTIVE +${deliveryPct}%` : 'STANDBY'),
+        this._passiveRow('🛰', 'SCAN', `${Math.round(state.minimapVisionRadius ?? 0)} PX`),
+      ];
+    } else if (local.passive?.id === 'bio-regen') {
+      const regenPct = Math.round((local.passive.regenPctPerSec ?? 0) * 100);
+      const healthBonusPct = Math.round((local.passive.allyMaxHealthBonus ?? 0) * 100);
+      rows = [
+        this._passiveRow('🧬', 'REGEN', state.bioRegenActive
+          ? `ACTIVE ${regenPct}%/S`
+          : `READY IN ${Math.ceil(state.bioRegenDelayRemaining ?? 0)}S`),
+        this._passiveRow('🤝', 'ALLY LINK', state.nearbyAllyBonus ? `+${healthBonusPct}% HP` : 'NO BONUS'),
+      ];
+    } else if (local.passive?.id === 'overclock') {
+      const sprintPct = Math.round(((local.passive.sprintSpeedMult ?? 1) - 1) * 100);
+      rows = [
+        this._passiveRow('⚙️', 'STACKS', `${state.overclockStacks ?? 0} / ${local.passive.maxStacks}`),
+        this._passiveRow('🏃', 'SPRINT', state.sprintActive ? `+${sprintPct}% ACTIVE` : 'IDLE'),
+      ];
+    }
+
+    passiveEl.innerHTML = `
+      <div class="passive-summary ${def.id}">${def.emoji} ${local.passive?.name ?? 'Passive'}</div>
+      ${rows.join('')}
+    `;
+  }
+
+  _passiveRow(icon, label, value) {
+    return `
+      <div class="passive-row">
+        <span class="passive-icon">${icon}</span>
+        <span class="passive-label">${label}</span>
+        <span class="passive-value">${value}</span>
+      </div>
+    `;
   }
 
   _updateAlliance(world) {

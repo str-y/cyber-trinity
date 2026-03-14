@@ -33,6 +33,16 @@ export const FACTIONS = {
     glowColor: 'rgba(74,168,255,0.45)',
     role: 'Data Sniper',
     emoji: '🔵',
+    passive: {
+      id: 'data-cache',
+      name: 'Data Cache',
+      deliveryBonusMult: 1.2,
+      minimapVisionRadius: 340,
+      details: [
+        'Owned base delivery score +20%',
+        'Wider minimap scan radius',
+      ],
+    },
   },
   green: {
     id: 'green',
@@ -43,6 +53,17 @@ export const FACTIONS = {
     glowColor: 'rgba(80,255,120,0.45)',
     role: 'Bio Guard',
     emoji: '🟢',
+    passive: {
+      id: 'bio-regen',
+      name: 'Bio Regen',
+      regenDelay: 5,
+      regenPctPerSec: 0.05,
+      allyMaxHealthBonus: 0.15,
+      details: [
+        'Heal 5% max HP/s after 5s out of combat',
+        'Adjacent ally grants +15% max HP',
+      ],
+    },
   },
   red: {
     id: 'red',
@@ -53,6 +74,17 @@ export const FACTIONS = {
     glowColor: 'rgba(255,68,68,0.45)',
     role: 'Core Striker',
     emoji: '🔴',
+    passive: {
+      id: 'overclock',
+      name: 'Overclock',
+      cooldownReductionPerStack: 2,
+      maxStacks: 3,
+      sprintSpeedMult: 1.1,
+      details: [
+        'Kills store -2s next ability cooldown',
+        'Sprint movement speed +10%',
+      ],
+    },
   },
 };
 
@@ -245,6 +277,8 @@ export class Base {
 export class Player {
   constructor(faction, index, x, y) {
     this.faction   = faction;
+    this.factionDef = FACTIONS[faction];
+    this.passive   = this.factionDef.passive;
     this.index     = index;
     this.x         = x;
     this.y         = y;
@@ -268,9 +302,21 @@ export class Player {
     this.jobDef    = jobDef;
     this.speed     = jobDef.speed;
     this.aggro     = jobDef.aggro;
+    this.baseMaxHealth = jobDef.maxHealth;
     this.health    = jobDef.maxHealth;
     this.maxHealth = jobDef.maxHealth;
     this.energy    = 100;
+    this.lastCombatTime = -Infinity;
+    this.passiveState = {
+      deliveryBonusActive: false,
+      minimapVisionRadius: this.passive?.minimapVisionRadius ?? 240,
+      bioRegenActive: false,
+      bioRegenDelayRemaining: 0,
+      nearbyAllyBonus: false,
+      overclockStacks: 0,
+      speedMult: 1,
+      sprintActive: false,
+    };
 
     // Primary skill (slot 0) used by AI and player
     const primary   = jobDef.skills[0];
@@ -305,7 +351,8 @@ export class Player {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) {
         this.alive = true;
-        this.health = this.maxHealth;
+        this.maxHealth = this.baseMaxHealth;
+        this.health = this.baseMaxHealth;
         const base = world.bases[this.faction];
         this.x = base.x + randRange(-30, 30);
         this.y = base.y + randRange(-30, 30);
@@ -339,7 +386,7 @@ export class Player {
           let totalScore = 0;
           for (const jewel of this.carrying) {
             const pts = deliveryTarget.deliverJewel(jewel.value);
-            totalScore += pts;
+            totalScore += world._applyDeliveryPassive(this, deliveryTarget, pts);
             jewel.delivered = true;
           }
           world.scores[this.faction] += totalScore;
@@ -404,13 +451,15 @@ export class Player {
         const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
         const dmg = baseDmg * dmgMult;
         world._registerDamage(enemy, this.faction);
+        this.markCombat(world.elapsed);
+        enemy.markCombat(world.elapsed);
         enemy.health -= dmg;
         world.sparks.push(...Particle.burst(
           (this.x + enemy.x) / 2,
           (this.y + enemy.y) / 2,
           FACTIONS[this.faction].color, 6));
-        if (enemy.health <= 0) {
-          world._recordElimination(enemy, this.faction, 'eliminated');
+      if (enemy.health <= 0) {
+          world._recordElimination(enemy, this, 'melee KO');
         }
       }
     }
@@ -560,7 +609,8 @@ export class Player {
     const dx = tx - this.x, dy = ty - this.y;
     const d  = Math.sqrt(dx * dx + dy * dy);
     if (d < 2) return;
-    const speedMult = world.factionBuffs?.[this.faction]?.speedMult ?? 1;
+    const speedMult = (world.factionBuffs?.[this.faction]?.speedMult ?? 1) *
+      (this.passiveState?.speedMult ?? 1);
     const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
     this.vx = lerp(this.vx, nx * effSpeed, 0.12);
@@ -606,7 +656,17 @@ export class Player {
     if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
 
     this.energy  -= this.abilityCost;
-    this.cooldown = this.abilityMax;
+    const cooldownReduction = (this.passive?.id === 'overclock')
+      ? (this.passive.cooldownReductionPerStack * Math.min(
+        this.passive.maxStacks,
+        this.passiveState?.overclockStacks ?? 0,
+      ))
+      : 0;
+    this.cooldown = Math.max(0, this.abilityMax - cooldownReduction);
+    if (this.passive?.id === 'overclock' && this.passiveState) {
+      this.passiveState.overclockStacks = 0;
+    }
+    this.markCombat(world.elapsed ?? 0);
 
     const dx = enemy.x - this.x;
     const dy = enemy.y - this.y;
@@ -617,6 +677,7 @@ export class Player {
     switch (skill.type) {
       case 'railshot': {
         proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage);
+        proj.owner = this;
         break;
       }
       case 'bioshield': {
@@ -636,6 +697,11 @@ export class Player {
       }
     }
     return proj;
+  }
+
+  markCombat(timestamp) {
+    this.lastCombatTime = timestamp;
+    if (this.passiveState) this.passiveState.bioRegenActive = false;
   }
 }
 
