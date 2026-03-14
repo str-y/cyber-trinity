@@ -20,6 +20,9 @@ function withAlpha(hex, a) {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+const RING_PARTICLE_ALPHA = 0.95;
+const CAMERA_ZOOM_THRESHOLD = 1.001;
+
 // ── Renderer class ────────────────────────────────────────────────────────────
 
 export class Renderer {
@@ -28,6 +31,7 @@ export class Renderer {
     this.ctx    = canvas.getContext('2d');
     this.time   = 0;
     this.lowQuality = false;
+    this.minimapBounds = null;
   }
 
   resize(w, h) {
@@ -40,16 +44,29 @@ export class Renderer {
     this.lowQuality = world.settings?.effectQuality === 'low';
     const ctx = this.ctx;
     const { width: W, height: H } = world;
+    const camera = world.getCameraState?.() ?? {
+      x: W / 2,
+      y: H / 2,
+      zoom: 1,
+      mode: 'overhead',
+      active: false,
+    };
 
     // ── Background ─────────────────────────────────────────────────────────
     ctx.fillStyle = '#050810';
     ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    this._applyCamera(camera, W, H);
 
     // Subtle grid (industrial floor)
     this._drawGrid(W, H);
 
     // ── Rain ───────────────────────────────────────────────────────────────
     this._drawRain(world.rain);
+
+    ctx.save();
+    this._applyReplayCamera(world, W, H);
 
     // ── Puddle / wet-floor reflections ─────────────────────────────────────
     if (!this.lowQuality) this._drawReflections(world, W, H);
@@ -70,6 +87,10 @@ export class Renderer {
       for (const tl of world.trilocks) {
         this._drawTriLock(tl, world);
       }
+    }
+
+    if (world.nexusGuardian?.state === 'active') {
+      this._drawNexusGuardian(world.nexusGuardian);
     }
 
     // ── Jewels (value-tiered) ──────────────────────────────────────────────
@@ -93,22 +114,64 @@ export class Renderer {
     // ── Ability projectiles ─────────────────────────────────────────────
     this._drawProjectiles(world.projectiles);
 
+    // ── Targeting and rally indicators ───────────────────────────────────
+    this._drawCommandIndicators(world);
+
     // ── Chaos event effects ────────────────────────────────────────────
     this._drawChaosEvent(world);
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
+    ctx.restore();
 
     // ── Match timer overlay ────────────────────────────────────────────────
     this._drawMatchTimer(world, W, H);
 
     // ── Victory overlay ────────────────────────────────────────────────────
-    if (world.matchEnded) this._drawVictoryOverlay(world);
+    if (world.matchEnded && !world.replay?.isActive) this._drawVictoryOverlay(world);
 
     // ── Vignette / atmospheric overlay ─────────────────────────────────────
     this._drawVignette(W, H);
+
+    // ── Minimap ────────────────────────────────────────────────────────────
+    this._drawMinimap(world, W, H);
   }
 
+  _applyReplayCamera(world, W, H) {
+    if (!world.replay?.isActive) return;
+    const zoom = world.camera?.zoom ?? 1;
+    const cx = world.camera?.x ?? W / 2;
+    const cy = world.camera?.y ?? H / 2;
+    this.ctx.translate(W / 2, H / 2);
+    this.ctx.scale(zoom, zoom);
+    this.ctx.translate(-cx, -cy);
+  }
+
+  _applyCamera(camera, W, H) {
+    const zoom = camera?.zoom ?? 1;
+    if (zoom <= CAMERA_ZOOM_THRESHOLD) return;
+    const x = camera?.x ?? W / 2;
+    const y = camera?.y ?? H / 2;
+    this.ctx.setTransform(zoom, 0, 0, zoom, W / 2 - x * zoom, H / 2 - y * zoom);
+  }
+
+  screenToMinimapWorld(clientX, clientY, world) {
+    if (!this.minimapBounds || !world?.width || !world?.height) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    const bounds = this.minimapBounds;
+    if (x < bounds.x || x > bounds.x + bounds.width ||
+        y < bounds.y || y > bounds.y + bounds.height) {
+      return null;
+    }
+    return {
+      x: ((x - bounds.x) / bounds.width) * world.width,
+      y: ((y - bounds.y) / bounds.height) * world.height,
+    };
+  }
   // ── Grid ──────────────────────────────────────────────────────────────────
 
   _drawGrid(W, H) {
@@ -222,6 +285,7 @@ export class Renderer {
     const pulse = 0.45 + 0.20 * Math.sin(this.time * 1.3 + base.shieldPulse);
     const R = BASE_RADIUS;
     const shieldsDown = world?.chaosEvent?.type === 'nexus_overload';
+    const highValue = (base.highValueMultiplier ?? 1) > 1;
 
     ctx.save();
 
@@ -233,6 +297,20 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(base.x, base.y, R * 2.2, 0, Math.PI * 2);
     ctx.fill();
+
+    if (highValue) {
+      const dataPulse = 0.55 + 0.35 * Math.sin(this.time * 6 + base.shieldPulse);
+      ctx.strokeStyle = `rgba(125,242,255,${0.45 + dataPulse * 0.3})`;
+      ctx.lineWidth = 4;
+      ctx.shadowBlur = 22;
+      ctx.shadowColor = '#7df2ff';
+      ctx.setLineDash([10, 6]);
+      ctx.lineDashOffset = -this.time * 48;
+      ctx.beginPath();
+      ctx.arc(base.x, base.y, R + 18 + 3 * Math.sin(this.time * 4), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     // Shield ring (animated) — suppressed during Nexus Overload
     if (!shieldsDown) {
@@ -273,6 +351,12 @@ export class Renderer {
       ctx.fillStyle = f.color;
       ctx.font      = 'bold 11px "Courier New", monospace';
       ctx.fillText(`💎 ×${base.crystalsStored}`, base.x, base.y - R - 14);
+    }
+
+    if (highValue) {
+      ctx.fillStyle = '#7df2ff';
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.fillText(`HIGH VALUE ×${base.highValueMultiplier ?? 1}`, base.x, base.y - R - 28);
     }
 
     ctx.restore();
@@ -523,10 +607,18 @@ export class Renderer {
       ctx.globalAlpha = p.alpha;
       ctx.shadowBlur  = this.lowQuality ? 0 : 6;
       ctx.shadowColor = p.color;
-      ctx.fillStyle   = `rgb(${r},${g},${b})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * p.alpha, 0, Math.PI * 2);
-      ctx.fill();
+      if (p.shape === 'ring') {
+        ctx.lineWidth = Math.max(1, p.lineWidth * p.alpha);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, p.alpha * RING_PARTICLE_ALPHA)})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle   = `rgb(${r},${g},${b})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.alpha, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
     ctx.shadowBlur  = 0;
@@ -590,6 +682,129 @@ export class Renderer {
       }
     }
     ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  _drawCommandIndicators(world) {
+    const ctx = this.ctx;
+    const local = world.localPlayer;
+    const target = world.focusedEnemy;
+
+    if (world.rallySignal) {
+      const signal = world.rallySignal;
+      const pulse = 0.55 + 0.25 * Math.sin(this.time * 8);
+      ctx.save();
+      ctx.strokeStyle = `rgba(74,168,255,${pulse})`;
+      ctx.fillStyle = `rgba(74,168,255,${0.14 + pulse * 0.12})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.arc(signal.x, signal.y, signal.radius * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(180,220,255,0.85)';
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('RALLY', signal.x, signal.y - signal.radius * 0.4 - 10);
+      ctx.restore();
+    }
+
+    if (world.minimapPins) {
+      for (const pin of world.minimapPins) {
+        const style = this._pinStyle(pin.type);
+        const pulse = 0.45 + 0.3 * Math.sin(this.time * 7 + pin.x * 0.01);
+        ctx.save();
+        ctx.strokeStyle = withAlpha(style.color, 0.45 + pulse * 0.35);
+        ctx.fillStyle = withAlpha(style.color, 0.10 + pulse * 0.10);
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 10]);
+        ctx.beginPath();
+        ctx.arc(pin.x, pin.y, pin.radius * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = withAlpha(style.color, 0.95);
+        ctx.font = 'bold 11px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.glyph, pin.x, pin.y + 4);
+        ctx.font = 'bold 9px "Courier New", monospace';
+        ctx.fillText(style.label, pin.x, pin.y - pin.radius * 0.38 - 10);
+        ctx.restore();
+      }
+    }
+
+    if (local?.alive && target?.alive) {
+      const dx = target.x - local.x;
+      const dy = target.y - local.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dx / len;
+      const ny = dy / len;
+      const arrowX = local.x + nx * Math.min(54, len * 0.45);
+      const arrowY = local.y + ny * Math.min(54, len * 0.45);
+      const targetColor = FACTIONS[target.faction].color;
+      const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 10]);
+      ctx.beginPath();
+      ctx.moveTo(local.x, local.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.translate(arrowX, arrowY);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = withAlpha(targetColor, 0.9);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-6, -8);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(targetColor, 0.95);
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+      ctx.restore();
+    }
+
+    const spectated = world.spectatorTarget;
+    if (!world.spectatorMode || !spectated?.alive) return;
+
+    const f = FACTIONS[spectated.faction];
+    const pulse = 0.45 + 0.3 * Math.sin(this.time * 6);
+    ctx.save();
+    ctx.strokeStyle = withAlpha(f.color, 0.45 + pulse * 0.4);
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = f.color;
+    ctx.beginPath();
+    ctx.arc(spectated.x, spectated.y, PLAYER_RADIUS + 13, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = withAlpha(f.color, 0.95);
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+      world.getCameraState?.().mode === 'follow' ? 'FOLLOW CAM' : 'SPECTATE',
+      spectated.x,
+      spectated.y - PLAYER_RADIUS - 20,
+    );
     ctx.restore();
   }
 
@@ -713,6 +928,36 @@ export class Renderer {
         ctx.fillText('SHIELD DOWN', base.x, base.y - BASE_RADIUS - 18);
       }
       ctx.restore();
+    } else if (event.type === 'data_storm') {
+      const W = world.width;
+      const H = world.height;
+      const pulse = 0.35 + 0.25 * Math.sin(t * 9);
+      ctx.save();
+      ctx.fillStyle = `rgba(10,28,40,${0.08 + pulse * 0.05})`;
+      ctx.fillRect(0, 0, W, H);
+      for (let i = 0; i < 42; i++) {
+        const y = (i * 31 + t * 80) % H;
+        const offset = Math.sin(t * 14 + i) * 18;
+        ctx.fillStyle = i % 5 === 0
+          ? `rgba(255,92,138,${0.05 + pulse * 0.04})`
+          : `rgba(125,242,255,${0.04 + pulse * 0.04})`;
+        ctx.fillRect(offset, y, W - Math.abs(offset) * 0.5, 3);
+      }
+      for (let i = 0; i < 24; i++) {
+        const blockW = 40 + (i % 4) * 24;
+        const blockH = 6 + (i % 3) * 3;
+        const x = (i * 97 + t * 120) % (W + blockW) - blockW;
+        const y = (i * 53 + t * 65) % H;
+        ctx.fillStyle = i % 2 === 0
+          ? `rgba(125,242,255,${0.10 + pulse * 0.05})`
+          : `rgba(255,255,255,${0.06 + pulse * 0.04})`;
+        ctx.fillRect(x, y, blockW, blockH);
+      }
+      ctx.fillStyle = `rgba(255,255,255,${0.04 + pulse * 0.03})`;
+      for (let y = 0; y < H; y += 5) {
+        ctx.fillRect(0, y, W, 1);
+      }
+      ctx.restore();
     }
   }
 
@@ -802,11 +1047,14 @@ export class Renderer {
     ctx.fillStyle   = `rgba(255,255,255,0.85)`;
     ctx.fillText(f.name.toUpperCase(), W / 2, H / 2 + 30);
 
-    // Restart countdown
+    // Post-match status
     ctx.shadowBlur  = 0;
     ctx.font        = `${Math.min(W * 0.025, 20)}px "Courier New", monospace`;
     ctx.fillStyle   = 'rgba(255,255,255,0.55)';
-    ctx.fillText(`Restarting in ${Math.ceil(Math.max(0, t))}s`, W / 2, H / 2 + 70);
+    const statusText = world.replay?.hasReplay
+      ? 'Replay ready — use the timeline controls below'
+      : `Restarting in ${Math.ceil(Math.max(0, t))}s`;
+    ctx.fillText(statusText, W / 2, H / 2 + 70);
 
     ctx.restore();
   }
@@ -821,6 +1069,7 @@ export class Renderer {
     const color = owned ? f.color : '#888888';
     const { r, g, b } = hexToRgb(color);
     const shieldsDown = world?.chaosEvent?.type === 'nexus_overload';
+    const highValue = (tl.highValueMultiplier ?? 1) > 1;
 
     ctx.save();
 
@@ -852,6 +1101,20 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+
+    if (highValue) {
+      const dataPulse = 0.55 + 0.35 * Math.sin(this.time * 6 + tl.shieldPulse);
+      ctx.strokeStyle = `rgba(125,242,255,${0.45 + dataPulse * 0.3})`;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = '#7df2ff';
+      ctx.setLineDash([8, 5]);
+      ctx.lineDashOffset = -this.time * 42;
+      ctx.beginPath();
+      ctx.arc(tl.x, tl.y, R + 14 + 2 * Math.sin(this.time * 5), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     // Capture progress ring
     const progress = (tl.captureProgress ?? 0) / 100;
@@ -892,6 +1155,82 @@ export class Renderer {
       ctx.fillText(`💎 ×${tl.crystalsStored}`, tl.x, tl.y - R - 10);
     }
 
+    if (highValue) {
+      ctx.fillStyle = '#7df2ff';
+      ctx.font = 'bold 8px "Courier New", monospace';
+      ctx.fillText(`HIGH VALUE ×${tl.highValueMultiplier ?? 1}`, tl.x, tl.y - R - 22);
+    }
+
+    ctx.restore();
+  }
+
+  _drawNexusGuardian(guardian) {
+    const ctx = this.ctx;
+    const pulse = 0.5 + 0.25 * Math.sin(this.time * 2.8);
+    const R = guardian.radius;
+
+    ctx.save();
+
+    const glow = ctx.createRadialGradient(guardian.x, guardian.y, R * 0.2, guardian.x, guardian.y, R * 2.7);
+    glow.addColorStop(0, `rgba(125,230,255,${0.28 + pulse * 0.18})`);
+    glow.addColorStop(0.5, 'rgba(110,190,255,0.14)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, R * 2.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(125,230,255,${0.35 + pulse * 0.25})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -this.time * 30;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, guardian.arenaRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(110,180,220,0.18)';
+    ctx.strokeStyle = 'rgba(160,245,255,0.75)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(guardian.x, guardian.y - R);
+    ctx.lineTo(guardian.x + R * 0.7, guardian.y - R * 0.15);
+    ctx.lineTo(guardian.x + R * 0.55, guardian.y + R * 0.75);
+    ctx.lineTo(guardian.x - R * 0.55, guardian.y + R * 0.75);
+    ctx.lineTo(guardian.x - R * 0.7, guardian.y - R * 0.15);
+    ctx.closePath();
+    ctx.shadowBlur = 24;
+    ctx.shadowColor = '#7de6ff';
+    ctx.fill();
+    ctx.stroke();
+
+    const core = ctx.createRadialGradient(guardian.x, guardian.y, R * 0.05, guardian.x, guardian.y, R * 0.55);
+    core.addColorStop(0, 'rgba(255,255,255,0.95)');
+    core.addColorStop(0.4, `rgba(160,250,255,${0.85 + pulse * 0.1})`);
+    core.addColorStop(1, 'rgba(20,80,120,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, R * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+
+    const hpPct = Math.max(0, guardian.health / Math.max(1, guardian.maxHealth));
+    const barW = 150;
+    const barH = 9;
+    const barX = guardian.x - barW / 2;
+    const barY = guardian.y - guardian.arenaRadius - 24;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0,8,18,0.8)';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.strokeStyle = 'rgba(125,230,255,0.55)';
+    ctx.strokeRect(barX, barY, barW, barH);
+    ctx.fillStyle = 'rgba(125,230,255,0.9)';
+    ctx.fillRect(barX + 1, barY + 1, (barW - 2) * hpPct, barH - 2);
+
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#c6f8ff';
+    ctx.fillText('NEXUS GUARDIAN', guardian.x, barY - 8);
+
     ctx.restore();
   }
 
@@ -926,5 +1265,257 @@ export class Renderer {
     grad.addColorStop(1, this.lowQuality ? 'rgba(0,0,0,0.48)' : 'rgba(0,0,0,0.62)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Minimap ───────────────────────────────────────────────────────────────
+
+  _drawMinimap(world, W, H) {
+    const ctx    = this.ctx;
+    const mapW   = 160;
+    const mapH   = 110;
+    const margin = 12;
+    // Bottom-right HUD ability panel is ~104 px tall + 18 px CSS bottom offset
+    const ABILITY_PANEL_CLEARANCE = 140;
+    const x0     = W - mapW - margin;
+    const y0     = H - mapH - ABILITY_PANEL_CLEARANCE;
+    const wW     = world.width;
+    const wH     = world.height;
+    const local  = world.localPlayer;
+    const visionRadius = local?.passiveState?.minimapVisionRadius ?? 240;
+    const filters = world.hud?.getMinimapFilters?.() ?? {
+      agents: { blue: true, green: true, red: true },
+      crystals: true,
+      chaosZones: true,
+    };
+    const agentFilters = filters.agents ?? { blue: true, green: true, red: true };
+    const localBaseAlert = local?.faction ? world.baseAttackAlerts?.[local.faction] : null;
+    const alertPulse = 0.35 + 0.3 * Math.sin(this.time * 10);
+    this.minimapBounds = { x: x0, y: y0, width: mapW, height: mapH };
+
+    // Map world coordinates → minimap pixel coordinates
+    const mx = (wx) => x0 + (wx / wW) * mapW;
+    const my = (wy) => y0 + (wy / wH) * mapH;
+    const isVisible = (wx, wy, faction = null) => {
+      if (!local?.alive) return true;
+      if (faction === local.faction) return true;
+      return Math.hypot(wx - local.x, wy - local.y) <= visionRadius;
+    };
+
+    ctx.save();
+
+    // ── Background panel ─────────────────────────────────────────────────
+    ctx.fillStyle   = localBaseAlert?.active
+      ? `rgba(40,6,12,${0.72 + alertPulse * 0.08})`
+      : 'rgba(2,8,20,0.72)';
+    ctx.strokeStyle = localBaseAlert?.active
+      ? `rgba(255,68,68,${0.45 + alertPulse * 0.45})`
+      : 'rgba(80,140,255,0.30)';
+    ctx.lineWidth   = 1;
+    ctx.fillRect(x0, y0, mapW, mapH);
+    ctx.strokeRect(x0, y0, mapW, mapH);
+
+    // Clip subsequent drawing to the minimap rectangle
+    ctx.beginPath();
+    ctx.rect(x0, y0, mapW, mapH);
+    ctx.clip();
+
+    const minimapJammed = world.chaosEvent?.type === 'data_storm';
+
+    if (minimapJammed) {
+      const pulse = 0.35 + 0.25 * Math.sin(this.time * 10);
+      ctx.save();
+      ctx.fillStyle = `rgba(10,26,38,${0.82 + pulse * 0.08})`;
+      ctx.fillRect(x0, y0, mapW, mapH);
+      for (let i = 0; i < 22; i++) {
+        const lineY = y0 + ((i * 19 + this.time * 46) % mapH);
+        const glitchX = x0 + ((i * 31) % 18);
+        ctx.fillStyle = i % 3 === 0
+          ? `rgba(125,242,255,${0.10 + pulse * 0.08})`
+          : `rgba(255,255,255,${0.05 + pulse * 0.06})`;
+        ctx.fillRect(glitchX, lineY, mapW - ((i * 17) % 24), 2);
+      }
+      for (let i = 0; i < 28; i++) {
+        const px = x0 + ((i * 47 + this.time * 70) % mapW);
+        const py = y0 + ((i * 29 + this.time * 95) % mapH);
+        const size = 1 + (i % 3);
+        ctx.fillStyle = i % 4 === 0
+          ? 'rgba(255,92,138,0.22)'
+          : 'rgba(125,242,255,0.18)';
+        ctx.fillRect(px, py, size * 2, size);
+      }
+      ctx.restore();
+    } else if (filters.chaosZones && world.chaosEvent) {
+      const event = world.chaosEvent;
+      const pulse = 0.15 + 0.18 * Math.sin(this.time * 8);
+      ctx.save();
+      if (event.type === 'emp_storm') {
+        ctx.strokeStyle = withAlpha(event.color, 0.5 + pulse);
+        ctx.fillStyle = withAlpha(event.color, pulse * 0.45);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mx(event.x), my(event.y), (event.radius / wW) * mapW, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = withAlpha(event.color, 0.45 + pulse);
+        ctx.fillStyle = withAlpha(event.color, 0.08 + pulse * 0.18);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0 + 3, y0 + 3, mapW - 6, mapH - 6);
+        ctx.fillRect(x0 + 3, y0 + 3, mapW - 6, mapH - 6);
+      }
+      ctx.restore();
+    }
+
+    if (!minimapJammed) {
+      // ── Home bases (large dots) ────────────────────────────────────────
+      for (const base of Object.values(world.bases)) {
+        const f = FACTIONS[base.faction];
+        const { r, g, b } = hexToRgb(f.color);
+        ctx.fillStyle   = `rgba(${r},${g},${b},0.95)`;
+        ctx.shadowBlur  = 8;
+        ctx.shadowColor = f.color;
+        ctx.beginPath();
+        ctx.arc(mx(base.x), my(base.y), 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // ── TriLock bases (medium dots) ────────────────────────────────────
+      if (world.trilocks) {
+        for (const tl of world.trilocks) {
+          if (!isVisible(tl.x, tl.y, tl.faction)) continue;
+          const color = tl.faction ? FACTIONS[tl.faction].color : '#666677';
+          const { r, g, b } = hexToRgb(color);
+          ctx.fillStyle  = `rgba(${r},${g},${b},0.75)`;
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = color;
+          ctx.beginPath();
+          ctx.arc(mx(tl.x), my(tl.y), 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      if (world.nexusGuardian?.state === 'active') {
+        const guardian = world.nexusGuardian;
+        const px = mx(guardian.x);
+        const py = my(guardian.y);
+        const pulse = 0.45 + 0.35 * Math.sin(this.time * 8);
+        ctx.strokeStyle = `rgba(160,250,255,${0.55 + pulse * 0.3})`;
+        ctx.fillStyle = 'rgba(160,250,255,0.95)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(px, py - 5);
+        ctx.lineTo(px + 5, py);
+        ctx.lineTo(px, py + 5);
+        ctx.lineTo(px - 5, py);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fill();
+      }
+
+      // ── Crystals (white, blinking) ──────────────────────────────────────
+      if (filters.crystals) {
+        const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
+        for (const crystal of world.crystals) {
+          if (crystal.delivered) continue;
+          if (!isVisible(crystal.x, crystal.y)) continue;
+          const tColor = crystal.tierColor ?? '#a0d4ff';
+          const { r, g, b } = hexToRgb(tColor);
+          ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
+          ctx.beginPath();
+          ctx.arc(mx(crystal.x), my(crystal.y), 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // ── Agents (small faction-coloured dots) ────────────────────────────
+      for (const player of world.players) {
+        if (!player.alive) continue;
+        if (!isVisible(player.x, player.y, player.faction)) continue;
+        if (!agentFilters[player.faction]) continue;
+        const f = FACTIONS[player.faction];
+        const { r, g, b } = hexToRgb(f.color);
+        ctx.fillStyle  = `rgba(${r},${g},${b},0.95)`;
+        ctx.shadowBlur = 3;
+        ctx.shadowColor = f.color;
+        ctx.beginPath();
+        ctx.arc(mx(player.x), my(player.y), 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (world.recentDeaths) {
+        for (const marker of world.recentDeaths) {
+          if (!isVisible(marker.x, marker.y, marker.faction)) continue;
+          const alpha = Math.min(1, marker.timer / 1.5);
+          ctx.strokeStyle = `rgba(255,90,90,${alpha})`;
+          ctx.lineWidth = 1.2;
+          const px = mx(marker.x);
+          const py = my(marker.y);
+          ctx.beginPath();
+          ctx.moveTo(px - 3, py - 3);
+          ctx.lineTo(px + 3, py + 3);
+          ctx.moveTo(px + 3, py - 3);
+          ctx.lineTo(px - 3, py + 3);
+          ctx.stroke();
+        }
+      }
+
+      if (world.minimapPins) {
+        for (const pin of world.minimapPins) {
+          const style = this._pinStyle(pin.type);
+          const pulse = 0.45 + 0.35 * Math.sin(this.time * 8 + pin.y * 0.01);
+          const px = mx(pin.x);
+          const py = my(pin.y);
+          ctx.strokeStyle = withAlpha(style.color, 0.45 + pulse * 0.35);
+          ctx.fillStyle = withAlpha(style.color, 0.9);
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.font = 'bold 7px "Courier New", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(style.glyph, px, py + 2.5);
+        }
+      }
+    }
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // ── "MAP" label (outside clip region) ────────────────────────────────
+    ctx.save();
+    ctx.fillStyle    = 'rgba(80,140,255,0.50)';
+    ctx.font         = 'bold 7px "Courier New", monospace';
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(minimapJammed ? 'MAP JAMMED' : (localBaseAlert?.active ? 'MAP ALERT' : 'MAP'), x0 + 4, y0 + 3);
+    if (minimapJammed) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(125,242,255,0.75)';
+      ctx.font = 'bold 10px "Courier New", monospace';
+      ctx.fillText('SIGNAL LOST', x0 + mapW / 2, y0 + mapH / 2);
+    } else if (local?.alive) {
+      const revealRadius = (visionRadius / wW) * mapW;
+      ctx.strokeStyle = withAlpha(FACTIONS[local.faction].color, 0.5);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(mx(local.x), my(local.y), Math.max(10, revealRadius), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  getSelectedPinType() {
+    return this._selectedPinType;
+  }
+
+  _pinStyle(type) {
+    return {
+      gather: { color: '#4aa8ff', glyph: '⌁', label: 'GROUP' },
+      danger: { color: '#ff4444', glyph: '!', label: 'DANGER' },
+      crystal: { color: '#ffd700', glyph: '◆', label: 'CRYSTAL' },
+    }[type] ?? { color: '#4aa8ff', glyph: '⌁', label: 'GROUP' };
   }
 }

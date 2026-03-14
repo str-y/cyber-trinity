@@ -5,14 +5,24 @@
  * jewel counter, TriLock status, hate indicator.
  */
 
+import { FACTIONS } from './entities.js';
+
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
+const DEFAULT_AGENT_LABEL = 'AGENT';
 
 export class HUD {
   constructor() {
     this._scoreEls   = {};
     this._feedItems  = [];
     this._scoreboardEl = null;
+    this._replayControlsBound = false;
+    this._minimapFilters = {
+      agents: { blue: true, green: true, red: true },
+      crystals: true,
+      chaosZones: true,
+    };
+    this._selectedPinType = 'gather';
     this._init();
   }
 
@@ -67,11 +77,69 @@ export class HUD {
       legend.appendChild(row);
     });
 
+    const minimapControls = document.getElementById('minimap-controls');
+    if (minimapControls) {
+      minimapControls.innerHTML = `
+        <div class="panel-title blue">MINIMAP TACTICS</div>
+        <div class="minimap-section-label">FILTERS</div>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="agents" data-filter-key="blue" checked />
+          <span class="blue">BLUE AGENTS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="agents" data-filter-key="green" checked />
+          <span class="green">GREEN AGENTS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="agents" data-filter-key="red" checked />
+          <span class="red">RED AGENTS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="root" data-filter-key="crystals" checked />
+          <span>CRYSTAL SPAWNS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="root" data-filter-key="chaosZones" checked />
+          <span>CHAOS ZONES</span>
+        </label>
+        <div class="minimap-section-label">PIN TYPE</div>
+        <div class="pin-type-row">
+          <button type="button" class="pin-type-button active" data-pin-type="gather">集合</button>
+          <button type="button" class="pin-type-button" data-pin-type="danger">危険</button>
+          <button type="button" class="pin-type-button" data-pin-type="crystal">クリスタル</button>
+        </div>
+        <div class="minimap-hint">CLICK THE MINIMAP TO ISSUE A TEAM PIN</div>
+        <div class="minimap-alert-state" id="minimap-alert-state">STATUS — STANDBY</div>
+      `;
+      minimapControls.addEventListener('change', (event) => {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement)) return;
+        const group = input.dataset.filterGroup;
+        const key = input.dataset.filterKey;
+        if (!group || !key) return;
+        if (group === 'agents') {
+          this._minimapFilters.agents[key] = input.checked;
+        } else {
+          this._minimapFilters[key] = input.checked;
+        }
+      });
+      minimapControls.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-pin-type]');
+        if (!(button instanceof HTMLButtonElement)) return;
+        this._selectedPinType = button.dataset.pinType ?? 'gather';
+        for (const node of minimapControls.querySelectorAll('[data-pin-type]')) {
+          node.classList.toggle('active', node === button);
+        }
+      });
+      this._minimapControlsEl = minimapControls;
+      this._minimapAlertEl = minimapControls.querySelector('#minimap-alert-state');
+    }
+
     // ── Left status (local blue agent) ────────────────────────────────────
 
     const statusLeft = document.getElementById('status-left');
     statusLeft.innerHTML = `
-      <div class="panel-title blue">AGENT STATUS — <span id="job-label">WARRIOR</span></div>
+      <div class="panel-title blue" id="status-title">AGENT STATUS — <span id="job-label">WARRIOR</span></div>
       ${this._barRow('❤️', 'HEALTH', 'health',  '130 / 130', 100, 'health')}
       ${this._barRow('⚡', 'ENERGY', 'energy',  '100 / 100', 100, 'energy')}
       <div class="stat-row" style="margin-top:2px">
@@ -79,16 +147,36 @@ export class HUD {
         <div class="stat-label">JEWELS</div>
         <div class="stat-num" id="carry-count" style="width:auto;font-size:11px;color:#ffd700">0 / 5</div>
       </div>
+      <div class="panel-title blue" id="passive-title">PASSIVE — DATA CACHE</div>
+      <div id="passive-state"></div>
     `;
 
     // ── Right status (ability / cooldown) ─────────────────────────────────
 
     const statusRight = document.getElementById('status-right');
     statusRight.innerHTML = `
-      <div class="panel-title blue">ABILITY — <span id="ability-label">POWER SLASH</span></div>
+      <div class="panel-title blue" id="ability-title">ABILITY — <span id="ability-label">POWER SLASH</span></div>
       ${this._barRow('🎯', 'CHARGE', 'ability', '100%', 100, 'ability')}
       ${this._barRow('⏱', 'COOLDOWN', 'cooldown', '0.0s', 0, 'cooldown')}
     `;
+
+    const spectatorPanel = document.getElementById('spectator-panel');
+    if (spectatorPanel) {
+      spectatorPanel.innerHTML = `
+        <div class="panel-title blue">SPECTATOR MODE</div>
+        <div class="spectator-line"><span>VIEW</span><b id="spectator-mode">OVERHEAD</b></div>
+        <div class="spectator-line"><span>FOLLOW</span><b id="spectator-target">—</b></div>
+        <div class="spectator-line"><span>HP</span><b id="spectator-health">—</b></div>
+        <div class="spectator-line"><span>ENERGY</span><b id="spectator-energy">—</b></div>
+        <div class="spectator-line"><span>ABILITY</span><b id="spectator-cooldown">—</b></div>
+        <div class="spectator-line"><span>JEWELS</span><b id="spectator-carry">—</b></div>
+        <div class="panel-title blue" style="margin-top:8px">BASE UPLINK</div>
+        <div id="spectator-bases"></div>
+        <div class="spectator-controls">V EXIT • C CAMERA • [ / ] TARGET • WASD FREE CAM</div>
+      `;
+      this._spectatorPanelEl = spectatorPanel;
+      this._spectatorBasesEl = spectatorPanel.querySelector('#spectator-bases');
+    }
 
     // ── Crystal counter ───────────────────────────────────────────────────
 
@@ -109,6 +197,10 @@ export class HUD {
         <div class="feature-line"><span>WHEN</span><b id="feature-when">—</b></div>
         <div class="feature-line"><span>WHAT</span><b id="feature-what">—</b></div>
         <div class="feature-line"><span>STATUS</span><b id="feature-status">PENDING</b></div>
+        <div class="panel-title blue panel-subtitle-spaced">NEXUS GUARDIAN</div>
+        <div class="feature-line"><span>STATE</span><b id="guardian-status">SPAWN IN 2:00</b></div>
+        <div class="feature-line"><span>VITALS</span><b id="guardian-vitals">OFFLINE</b></div>
+        <div class="feature-line"><span>BLESSING</span><b id="guardian-blessing">—</b></div>
       `;
     }
 
@@ -138,6 +230,32 @@ export class HUD {
         <div class="scoreboard-row"><span class="blue">THE ARCHIVE</span><span id="sb-blue-kills">0</span><span id="sb-blue-deaths">0</span><span id="sb-blue-assists">0</span><span id="sb-blue-crystals">0</span><span id="sb-blue-score">0</span></div>
         <div class="scoreboard-row"><span class="green">LIFE FORGE</span><span id="sb-green-kills">0</span><span id="sb-green-deaths">0</span><span id="sb-green-assists">0</span><span id="sb-green-crystals">0</span><span id="sb-green-score">0</span></div>
         <div class="scoreboard-row"><span class="red">CORE PROTOCOL</span><span id="sb-red-kills">0</span><span id="sb-red-deaths">0</span><span id="sb-red-assists">0</span><span id="sb-red-crystals">0</span><span id="sb-red-score">0</span></div>
+        <div class="replay-panel" id="replay-panel">
+          <div class="panel-title blue">MATCH REPLAY</div>
+          <div class="replay-actions">
+            <button type="button" id="replay-toggle">PLAY REPLAY</button>
+            <button type="button" id="replay-export">EXPORT JSON</button>
+            <button type="button" id="replay-exit">LIVE RESULT</button>
+            <button type="button" id="replay-restart">NEW MATCH</button>
+          </div>
+          <div class="replay-timeline-row">
+            <span id="replay-current-time">0:00</span>
+            <input type="range" id="replay-timeline" min="0" max="0" step="0.1" value="0" />
+            <span id="replay-duration">0:00</span>
+          </div>
+          <div class="replay-meta">
+            <label for="replay-speed">SPD</label>
+            <select id="replay-speed">
+              <option value="0.25">0.25×</option>
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+            </select>
+            <span id="replay-status">Replay saved automatically after the match.</span>
+          </div>
+          <div class="replay-hint">Replay spectator camera: WASD/Arrows pan, +/- zoom, slider to seek.</div>
+        </div>
       `;
       this._scoreboardEl = scoreboard;
     }
@@ -159,6 +277,7 @@ export class HUD {
   // ── Per-frame update ─────────────────────────────────────────────────────
 
   update(world) {
+    this._bindReplayControls(world);
     // Scores — highlight leading faction
     const leadFaction = world._leadingFaction?.();
     for (const [f, el] of Object.entries(this._scoreEls)) {
@@ -185,9 +304,28 @@ export class HUD {
       timerVal.style.color = t < 30 ? '#ff4444' : '#a0d4ff';
     }
 
+    const statusLeft = document.getElementById('status-left');
+    const statusRight = document.getElementById('status-right');
+    if (world.spectatorMode) {
+      if (statusLeft) statusLeft.style.display = 'none';
+      if (statusRight) statusRight.style.display = 'none';
+    } else {
+      if (statusLeft) statusLeft.style.display = 'flex';
+      if (statusRight) statusRight.style.display = 'flex';
+    }
+
     // First blue player as "local player"
-    const local = world.players.find(p => p.faction === 'blue');
-    if (local) {
+    const local = world.localPlayer;
+    if (local && !world.spectatorMode) {
+      const statusTitle = document.getElementById('status-title');
+      if (statusTitle) statusTitle.className = `panel-title ${local.faction}`;
+      const abilityTitle = document.getElementById('ability-title');
+      if (abilityTitle) abilityTitle.className = `panel-title ${local.faction}`;
+      const passiveTitle = document.getElementById('passive-title');
+      if (passiveTitle) {
+        passiveTitle.className = `panel-title ${local.faction}`;
+        passiveTitle.textContent = `PASSIVE — ${(local.passive?.name ?? 'NONE').toUpperCase()}`;
+      }
       this._setBar('health', local.health, local.maxHealth,
         `${Math.round(local.health)} / ${local.maxHealth}`);
       this._setBar('energy', local.energy, 100,
@@ -211,7 +349,11 @@ export class HUD {
       // Ability label
       const abilityLabel = document.getElementById('ability-label');
       if (abilityLabel) abilityLabel.textContent = (local.abilityName ?? 'SKILL').toUpperCase();
+
+      this._updatePassive(local);
     }
+
+    this._updateSpectator(world);
 
     // Jewel counter
     const alive = world.crystals.filter(c => !c.delivered && !c.carrier).length;
@@ -220,6 +362,7 @@ export class HUD {
 
     // Feature contract
     this._updateFeature(world);
+    this._updateGuardian(world);
 
     // Alliance indicator
     this._updateAlliance(world);
@@ -228,6 +371,29 @@ export class HUD {
     this._updateFeed(world);
     this._updateChaosEvent(world);
     this._updateScoreboard(world);
+    this._updateMinimapStatus(world);
+  }
+
+  _bindReplayControls(world) {
+    if (this._replayControlsBound) return;
+    const toggle = document.getElementById('replay-toggle');
+    const exportBtn = document.getElementById('replay-export');
+    const restart = document.getElementById('replay-restart');
+    const exit = document.getElementById('replay-exit');
+    const timeline = document.getElementById('replay-timeline');
+    const speed = document.getElementById('replay-speed');
+    if (!toggle || !exportBtn || !restart || !exit || !timeline || !speed) return;
+
+    toggle.addEventListener('click', () => world.toggleReplayPlayback());
+    exportBtn.addEventListener('click', () => world.exportReplayFile());
+    restart.addEventListener('click', () => world.restartLiveMatch());
+    exit.addEventListener('click', () => world.exitReplayPlayback());
+    timeline.addEventListener('input', event => {
+      if (!world.replay?.isActive) world.startReplayPlayback();
+      world.setReplayTime(event.target.value);
+    });
+    speed.addEventListener('change', event => world.setReplaySpeed(event.target.value));
+    this._replayControlsBound = true;
   }
 
   _setBar(id, value, max, numText) {
@@ -304,6 +470,85 @@ export class HUD {
     }
   }
 
+  _updatePassive(local) {
+    const passiveEl = document.getElementById('passive-state');
+    if (!passiveEl) return;
+
+    const def = FACTIONS[local.faction];
+    const state = local.passiveState ?? {};
+    let rows = [];
+
+    if (local.passive?.id === 'data-cache') {
+      const deliveryPct = Math.round(((local.passive.deliveryBonusMult ?? 1) - 1) * 100);
+      rows = [
+        this._passiveRow('📦', 'BASE BONUS', state.deliveryBonusActive ? `ACTIVE +${deliveryPct}%` : 'STANDBY'),
+        this._passiveRow('🛰', 'SCAN', `${Math.round(state.minimapVisionRadius ?? 0)} PX`),
+      ];
+    } else if (local.passive?.id === 'bio-regen') {
+      const regenPct = Math.round((local.passive.regenPctPerSec ?? 0) * 100);
+      const healthBonusPct = Math.round((local.passive.allyMaxHealthBonus ?? 0) * 100);
+      rows = [
+        this._passiveRow('🧬', 'REGEN', state.bioRegenActive
+          ? `ACTIVE ${regenPct}%/S`
+          : `READY IN ${Math.ceil(state.bioRegenDelayRemaining ?? 0)}S`),
+        this._passiveRow('🤝', 'ALLY LINK', state.nearbyAllyBonus ? `+${healthBonusPct}% HP` : 'NO BONUS'),
+      ];
+    } else if (local.passive?.id === 'overclock') {
+      const sprintPct = Math.round(((local.passive.sprintSpeedMult ?? 1) - 1) * 100);
+      rows = [
+        this._passiveRow('⚙️', 'STACKS', `${state.overclockStacks ?? 0} / ${local.passive.maxStacks}`),
+        this._passiveRow('🏃', 'SPRINT', state.sprintActive ? `+${sprintPct}% ACTIVE` : 'IDLE'),
+      ];
+    }
+
+    passiveEl.innerHTML = `
+      <div class="passive-summary ${def.id}">${def.emoji} ${local.passive?.name ?? 'Passive'}</div>
+      ${rows.join('')}
+    `;
+  }
+
+  _formatTimer(seconds) {
+    const total = Math.max(0, Math.ceil(seconds ?? 0));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _updateGuardian(world) {
+    const status = document.getElementById('guardian-status');
+    const vitals = document.getElementById('guardian-vitals');
+    const blessing = document.getElementById('guardian-blessing');
+    const guardian = world.nexusGuardian;
+    if (!status || !vitals || !blessing || !guardian) return;
+
+    if (guardian.state === 'active') {
+      status.textContent = 'ACTIVE';
+      vitals.textContent = `${Math.ceil(guardian.health)} / ${guardian.maxHealth}`;
+    } else if (guardian.state === 'respawning') {
+      status.textContent = `RESPAWN IN ${this._formatTimer(guardian.timer)}`;
+      vitals.textContent = `HP ×${(1.5 ** guardian.spawnCount).toFixed(2)}`;
+    } else {
+      status.textContent = `SPAWN IN ${this._formatTimer(guardian.timer)}`;
+      vitals.textContent = 'OFFLINE';
+    }
+
+    const activeBlessing = Object.entries(world.guardianBlessings ?? {})
+      .find(([, buff]) => (buff?.timer ?? 0) > 0);
+    blessing.textContent = activeBlessing
+      ? `${activeBlessing[0].toUpperCase()} ${Math.ceil(activeBlessing[1].timer)}s`
+      : '—';
+  }
+
+  _passiveRow(icon, label, value) {
+    return `
+      <div class="passive-row">
+        <span class="passive-icon">${icon}</span>
+        <span class="passive-label">${label}</span>
+        <span class="passive-value">${value}</span>
+      </div>
+    `;
+  }
+
   _updateAlliance(world) {
     if (!this._allianceEl) return;
     const alliance = world.alliance;
@@ -348,19 +593,22 @@ export class HUD {
 
   _updateScoreboard(world) {
     if (!this._scoreboardEl) return;
-    const visible = !!world.matchEnded;
+    const replayState = world.replay?.getHudState?.() ?? { available: false, active: false };
+    const finalReplayFrame = world.replay?.savedReplay?.frames?.at?.(-1) ?? null;
+    const summaryWorld = replayState.active && finalReplayFrame ? finalReplayFrame : world;
+    const visible = !!world.matchEnded || replayState.active;
     this._scoreboardEl.style.display = visible ? 'flex' : 'none';
     if (!visible) return;
 
     const winner = document.getElementById('scoreboard-winner');
     if (winner) {
-      const winnerFaction = world.winnerFaction ? world.winnerFaction.toUpperCase() : 'UNKNOWN';
+      const winnerFaction = summaryWorld.winnerFaction ? summaryWorld.winnerFaction.toUpperCase() : 'UNKNOWN';
       winner.textContent = `${winnerFaction} VICTORY`;
     }
 
     for (const faction of ['blue', 'green', 'red']) {
-      const stats = world.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
-      const score = world.scores[faction] ?? 0;
+      const stats = summaryWorld.stats[faction] ?? { kills: 0, deaths: 0, assists: 0, crystals: 0 };
+      const score = summaryWorld.scores[faction] ?? 0;
       const set = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.textContent = String(val);
@@ -371,5 +619,130 @@ export class HUD {
       set(`sb-${faction}-crystals`, stats.crystals);
       set(`sb-${faction}-score`, score);
     }
+
+    const replayPanel = document.getElementById('replay-panel');
+    const replayToggle = document.getElementById('replay-toggle');
+    const replayExit = document.getElementById('replay-exit');
+    const replayExport = document.getElementById('replay-export');
+    const replayTimeline = document.getElementById('replay-timeline');
+    const replaySpeed = document.getElementById('replay-speed');
+    const replayCurrent = document.getElementById('replay-current-time');
+    const replayDuration = document.getElementById('replay-duration');
+    const replayStatus = document.getElementById('replay-status');
+    if (!replayPanel || !replayToggle || !replayExit || !replayExport ||
+        !replayTimeline || !replaySpeed || !replayCurrent || !replayDuration || !replayStatus) return;
+
+    replayPanel.style.display = replayState.available ? 'flex' : 'none';
+    replayToggle.disabled = !replayState.available;
+    replayExport.disabled = !replayState.available;
+    replayExit.disabled = !replayState.active;
+    replayTimeline.disabled = !replayState.available;
+    replaySpeed.disabled = !replayState.available;
+    replayToggle.textContent = replayState.active
+      ? (replayState.playing ? 'PAUSE REPLAY' : 'RESUME REPLAY')
+      : 'PLAY REPLAY';
+    replayTimeline.max = String(replayState.duration || 0);
+    replayTimeline.value = String(replayState.time || 0);
+    replaySpeed.value = String(replayState.speed || 1);
+    replayCurrent.textContent = this._formatReplayTime(replayState.time || 0);
+    replayDuration.textContent = this._formatReplayTime(replayState.duration || 0);
+    replayStatus.textContent = replayState.available
+      ? `${replayState.storedFrames} recorded frames ready${replayState.active ? ' — replay mode active' : ''}.`
+      : 'Replay becomes available when the match ends.';
+  }
+
+  _formatReplayTime(seconds) {
+    const total = Math.max(0, Number(seconds) || 0);
+    const mins = Math.floor(total / 60);
+    const secs = Math.floor(total % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _updateSpectator(world) {
+    if (!this._spectatorPanelEl) return;
+    if (!world.spectatorMode) {
+      this._spectatorPanelEl.style.display = 'none';
+      return;
+    }
+
+    this._spectatorPanelEl.style.display = 'flex';
+    const observed = world.getObservedPlayer?.() ?? null;
+    const set = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+
+    set('spectator-mode', (world.spectatorCameraMode ?? 'overhead').toUpperCase());
+    if (observed) {
+      const hpPct = Math.round((observed.health / observed.maxHealth) * 100);
+      const energyPct = Math.round(observed.energy);
+      set(
+        'spectator-target',
+        `${observed.faction.toUpperCase()} · ${(observed.jobDef?.label ?? DEFAULT_AGENT_LABEL).toUpperCase()} #${observed.index + 1}`,
+      );
+      set('spectator-health', `${Math.round(observed.health)} / ${observed.maxHealth} (${hpPct}%)`);
+      set('spectator-energy', `${energyPct} / 100`);
+      set('spectator-cooldown', `${observed.abilityName.toUpperCase()} · ${observed.cooldown.toFixed(1)}s`);
+      set('spectator-carry', `${observed.carrying.length} / 5`);
+    } else {
+      set('spectator-target', `NO LIVE ${DEFAULT_AGENT_LABEL}`);
+      set('spectator-health', '—');
+      set('spectator-energy', '—');
+      set('spectator-cooldown', '—');
+      set('spectator-carry', '—');
+    }
+
+    if (!this._spectatorBasesEl) return;
+    const homeLines = ['blue', 'green', 'red'].map(faction => {
+      const base = world.bases?.[faction];
+      const stored = base?.crystalsStored ?? 0;
+      return `<div class="spectator-base ${faction}">${faction.toUpperCase()} HOME · 💎${stored}</div>`;
+    });
+    const trilockLines = (world.trilocks ?? []).map((base, index) => {
+      const owner = base.faction ? base.faction.toUpperCase() : 'NEUTRAL';
+      const capture = base.captureFaction ? ` · CAP ${base.captureFaction.toUpperCase()} ${Math.round(base.captureProgress)}%` : '';
+      return `
+        <div class="spectator-base ${base.faction ?? ''}">
+          T${index + 1} · ${owner} · Lv${base.level ?? 0} · 💎${base.crystalsStored ?? 0}${capture}
+        </div>
+      `;
+    });
+    this._spectatorBasesEl.innerHTML = [...homeLines, ...trilockLines].join('');
+  }
+
+  _updateMinimapStatus(world) {
+    if (!this._minimapAlertEl) return;
+    const localFaction = world.localPlayer?.faction ?? 'blue';
+    const baseAlert = world.baseAttackAlerts?.[localFaction];
+    const pin = world._getActivePinForFaction?.(localFaction);
+    let text = 'STATUS — STANDBY';
+    let tone = '';
+    if (baseAlert?.active) {
+      text = 'ALERT — BASE UNDER ATTACK';
+      tone = 'alert';
+    } else if (world.nexusGuardian?.state === 'active') {
+      text = '🛡️ NEXUS GUARDIAN ACTIVE';
+      tone = 'chaos';
+    } else if (world.chaosEvent) {
+      text = `${world.chaosEvent.emoji} ${world.chaosEvent.name} ACTIVE`;
+      tone = 'chaos';
+    } else if (pin) {
+      const labels = { gather: '集合', danger: '危険', crystal: 'クリスタル' };
+      text = `PIN — ${labels[pin.type] ?? pin.type.toUpperCase()}`;
+      tone = pin.type;
+    }
+    this._minimapAlertEl.textContent = text;
+    this._minimapAlertEl.dataset.tone = tone;
+    if (this._minimapControlsEl) {
+      this._minimapControlsEl.classList.toggle('alerting', !!baseAlert?.active);
+    }
+  }
+
+  getMinimapFilters() {
+    return this._minimapFilters;
+  }
+
+  getSelectedPinType() {
+    return this._selectedPinType;
   }
 }

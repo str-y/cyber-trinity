@@ -54,9 +54,9 @@ Game (world state, update loop)
 
 | Rule | Detail |
 |------|--------|
-| **Teams** | 3 teams × 5 agents (5v5v5) |
-| **Match length** | 5 minutes (300 s countdown) |
-| **Victory** | Team with the most **win points** when time expires |
+| **Teams** | Standard: 3 teams × 5 agents (5v5v5) / Quick Match: 3 teams × 2 agents (2v2v2) |
+| **Match length** | Standard: 5 minutes / Quick Match: 3 minutes |
+| **Victory** | Standard: first to 150 points (or highest score at time-up) / Quick Match: first to 80 points |
 | **Jewel delivery** | Pick up jewels → deliver to any owned base (home or captured TriLock) |
 | **TriLock capture** | Stand inside a neutral/enemy TriLock to capture it; contested = no progress |
 | **Death penalty** | On death, drop ALL carried jewels on the ground |
@@ -66,11 +66,11 @@ Game (world state, update loop)
 
 ## Factions
 
-| Colour | Name | Role | Base |
-|--------|------|------|------|
-| 🔵 Blue  | **The Archive**      | Data Sniper   | Animated server rack — energy rifle snipers on high ground |
-| 🟢 Green | **Life Forge**       | Bio Guard     | Bionic tree — shield-wall warriors, close-range AoE heal |
-| 🔴 Red   | **Core Protocol**    | Core Striker  | Furnace core — power-fist dash, highest movement speed |
+| Colour | Name | Role | Passive | Base |
+|--------|------|------|---------|------|
+| 🔵 Blue  | **The Archive**      | Data Sniper   | **Data Cache** — owned-base deliveries +20%, wider minimap scan | Animated server rack — energy rifle snipers on high ground |
+| 🟢 Green | **Life Forge**       | Bio Guard     | **Bio Regen** — 5% max HP/s after 5s out of combat, adjacent ally grants +15% max HP | Bionic tree — shield-wall warriors, close-range AoE heal |
+| 🔴 Red   | **Core Protocol**    | Core Striker  | **Overclock** — kills bank -2s next ability cooldown (max 3), sprint speed +10% | Furnace core — power-fist dash, highest movement speed |
 
 ---
 
@@ -138,15 +138,15 @@ Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Sco
 
 ## Mechanics
 
-- **15 agents** compete simultaneously (5v5v5), each with a job class.
+- **Two playable rule sets** — Standard runs at 5v5v5, while Quick Match compresses the loop into 2v2v2.
 - **Jewels** (`MemoryCrystal`) — value-tiered glowing polyhedra scattered across the field.
   Agents pick them up (carry up to 5) and deliver them to an owned base for points.
-- **TriLock bases** — 5 neutral hexagonal bases scattered in a ring at the centre.
+- **TriLock bases** — Standard uses 5 neutral bases in a ring; Quick Match uses 3 bases in a compact triangle.
   Capture by standing in range; level up through deliveries.
 - **Death penalty** — killed agents drop ALL carried jewels on the ground.
 - **Hate control** — AI fighters target the leading team 60% of the time.
 - **Combat scoring**: defeating an enemy agent grants **+5 points**, and recent damage contributors receive an **assist +2 points**.
-- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload.
+- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload, and Data Storm.
 - **Feature contracts** chain: Overclock Uplink → Deploy Firewall → Core Meltdown.
 
 ---
@@ -219,13 +219,22 @@ python3 -m http.server 8080
 
 Controls (browser preview):
 
-- `W/A/S/D` or Arrow keys: move the local blue agent (`YOU`)
+- Choose your starting faction on the launch screen before deploying.
+- `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
 - `Space`: activate job ability (Warrior: Power Slash) when charged
-- `Esc`: open the settings panel
-  - Game speed: `0.5× / 1× / 2×`
-  - Effect quality: `Low / High`
-  - HUD display: `On / Off`
-  - CRT effect: `On / Off`
+- `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT)
+- `Tab`: lock the nearest enemy and show a direction indicator / target marker
+- `E`: manually drop one carried jewel for tactical hand-offs
+- `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
+- `V`: toggle spectator mode at any time during the match
+- `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
+- `[` / `]`: switch the followed agent in spectator mode
+- `R`: enter replay mode after a match ends
+- `L`: load a saved replay file
+- `Space`: play/pause replay playback (in replay mode)
+- `[` / `]`: seek backward/forward 5 seconds in replay
+- Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
+- Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time
 
 ---
 

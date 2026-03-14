@@ -1,11 +1,15 @@
 // Copyright 2024 Cyber Trinity. All Rights Reserved.
 #include "GameFramework/CyberTrinityGameMode.h"
 #include "GameFramework/CyberTrinityGameState.h"
+#include "GameFramework/CyberTrinitySpectatorPawn.h"
 #include "Characters/AgentCharacter.h"
 #include "Factions/DataNode.h"
+#include "HUD/CyberTrinityHUD.h"
 #include "Pickups/MemoryCrystal.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/SpectatorPawn.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
@@ -13,6 +17,9 @@
 ACyberTrinityGameMode::ACyberTrinityGameMode()
 {
     GameStateClass = ACyberTrinityGameState::StaticClass();
+    HUDClass = ACyberTrinityHUD::StaticClass();
+    SpectatorClass = ACyberTrinitySpectatorPawn::StaticClass();
+    SpectatorPawnClass = ACyberTrinitySpectatorPawn::StaticClass();
 }
 
 void ACyberTrinityGameMode::BeginPlay()
@@ -202,4 +209,94 @@ UFactionDefinition* ACyberTrinityGameMode::GetFactionDefinition(EFaction Faction
         case EFaction::CoreProtocol: return CoreProtocolFaction;
         default: return nullptr;
     }
+}
+
+void ACyberTrinityGameMode::EnterSpectatorMode(APlayerController* PlayerController)
+{
+    if (!PlayerController || GetSpectatorPawn(PlayerController))
+    {
+        return;
+    }
+
+    APawn* CurrentPawn = PlayerController->GetPawn();
+    const FVector SpawnLocation = CurrentPawn
+        ? CurrentPawn->GetActorLocation() + FVector(0.f, 0.f, 350.f)
+        : FVector::ZeroVector;
+    const FRotator SpawnRotation = CurrentPawn
+        ? CurrentPawn->GetActorRotation()
+        : FRotator(-40.f, 0.f, 0.f);
+
+    if (CurrentPawn)
+    {
+        SavedPlayerPawns.FindOrAdd(PlayerController) = CurrentPawn;
+        PlayerController->UnPossess();
+        CurrentPawn->SetActorHiddenInGame(true);
+        CurrentPawn->SetActorEnableCollision(false);
+    }
+
+    PlayerController->StartSpectatingOnly();
+
+    FActorSpawnParameters Params;
+    Params.Owner = PlayerController;
+    Params.SpawnCollisionHandlingOverride =
+        ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+    UClass* PawnClass = SpectatorPawnClass
+        ? SpectatorPawnClass.Get()
+        : SpectatorClass.Get();
+
+    ASpectatorPawn* SpectatorPawn = GetWorld()->SpawnActor<ASpectatorPawn>(
+        PawnClass, SpawnLocation, SpawnRotation, Params);
+    if (!SpectatorPawn)
+    {
+        if (CurrentPawn)
+        {
+            CurrentPawn->SetActorHiddenInGame(false);
+            CurrentPawn->SetActorEnableCollision(true);
+            PlayerController->Possess(CurrentPawn);
+            SavedPlayerPawns.Remove(PlayerController);
+        }
+        return;
+    }
+
+    PlayerController->Possess(SpectatorPawn);
+    PlayerController->ChangeState(NAME_Spectating);
+    PlayerController->SetViewTarget(SpectatorPawn);
+
+    if (ACyberTrinitySpectatorPawn* TypedSpectator = Cast<ACyberTrinitySpectatorPawn>(SpectatorPawn))
+    {
+        TypedSpectator->CycleObservedAgent(1);
+    }
+}
+
+void ACyberTrinityGameMode::ExitSpectatorMode(APlayerController* PlayerController)
+{
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    APawn* const* SavedPawn = SavedPlayerPawns.Find(PlayerController);
+    if (!SavedPawn || !*SavedPawn)
+    {
+        return;
+    }
+
+    if (APawn* SpectatorPawn = PlayerController->GetPawn())
+    {
+        PlayerController->UnPossess();
+        SpectatorPawn->Destroy();
+    }
+
+    (*SavedPawn)->SetActorHiddenInGame(false);
+    (*SavedPawn)->SetActorEnableCollision(true);
+    PlayerController->Possess(*SavedPawn);
+    PlayerController->ChangeState(NAME_Playing);
+    PlayerController->SetViewTarget(*SavedPawn);
+    SavedPlayerPawns.Remove(PlayerController);
+}
+
+ACyberTrinitySpectatorPawn* ACyberTrinityGameMode::GetSpectatorPawn(APlayerController* PlayerController) const
+{
+    return PlayerController ? Cast<ACyberTrinitySpectatorPawn>(PlayerController->GetPawn()) : nullptr;
 }
