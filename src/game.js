@@ -13,6 +13,16 @@ import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
 import { ReplayManager } from './replay.js';
+import {
+  ARMOR_COLOR_VARIANTS,
+  DEATH_EFFECT_VARIANTS,
+  EFFECT_COLOR_VARIANTS,
+  TRAIL_EFFECT_VARIANTS,
+  fillSelectOptions,
+  loadAgentCustomization,
+  resolveEffectColor,
+  saveAgentCustomization,
+} from './customization.js';
 
 const RAIN_COUNT      = 220;
 const CRYSTAL_COUNT   = 12;
@@ -424,6 +434,7 @@ export class Game {
       crtEnabled: true,
       panelOpen: false,
     };
+    this.agentCustomization = loadAgentCustomization();
     this._bindInput();
     this._initSettingsPanel();
     this._applySettings();
@@ -561,7 +572,10 @@ export class Game {
     this.localPlayer = this.players.find(p => p.faction === this.playerFaction)
       ?? this.players.find(p => p.faction === 'blue')
       ?? null;
-    if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
+    if (this.localPlayer) {
+      this.localPlayer.isPlayerControlled = true;
+      this._applyLocalCustomization();
+    }
     this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
     this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
 
@@ -655,9 +669,22 @@ export class Game {
     const quality = document.getElementById('setting-effect-quality');
     const hudToggle = document.getElementById('setting-hud-visible');
     const crtToggle = document.getElementById('setting-crt-enabled');
+    const armorColor = document.getElementById('setting-armor-color');
+    const effectColor = document.getElementById('setting-effect-color');
+    const trailEffect = document.getElementById('setting-trail-effect');
+    const deathEffect = document.getElementById('setting-death-effect');
 
     this._settingsPanel = panel;
-    this._settingsControls = { speed, quality, hudToggle, crtToggle };
+    this._settingsControls = {
+      speed,
+      quality,
+      hudToggle,
+      crtToggle,
+      armorColor,
+      effectColor,
+      trailEffect,
+      deathEffect,
+    };
 
     if (speed) {
       speed.value = String(this.settings.gameSpeed);
@@ -687,6 +714,142 @@ export class Game {
         this.settings.crtEnabled = crtToggle.checked;
         this._applySettings();
       });
+    }
+
+    fillSelectOptions(armorColor, ARMOR_COLOR_VARIANTS);
+    fillSelectOptions(effectColor, EFFECT_COLOR_VARIANTS);
+    fillSelectOptions(trailEffect, TRAIL_EFFECT_VARIANTS);
+    fillSelectOptions(deathEffect, DEATH_EFFECT_VARIANTS);
+
+    if (armorColor) {
+      armorColor.value = this.agentCustomization.armorColor;
+      armorColor.addEventListener('change', () => {
+        this.agentCustomization.armorColor = armorColor.value;
+        this._persistAgentCustomization();
+      });
+    }
+
+    if (effectColor) {
+      effectColor.value = this.agentCustomization.effectColor;
+      effectColor.addEventListener('change', () => {
+        this.agentCustomization.effectColor = effectColor.value;
+        this._persistAgentCustomization();
+      });
+    }
+
+    if (trailEffect) {
+      trailEffect.value = this.agentCustomization.trailEffect;
+      trailEffect.addEventListener('change', () => {
+        this.agentCustomization.trailEffect = trailEffect.value;
+        this._persistAgentCustomization();
+      });
+    }
+
+    if (deathEffect) {
+      deathEffect.value = this.agentCustomization.deathEffect;
+      deathEffect.addEventListener('change', () => {
+        this.agentCustomization.deathEffect = deathEffect.value;
+        this._persistAgentCustomization();
+      });
+    }
+  }
+
+  _persistAgentCustomization() {
+    this.agentCustomization = saveAgentCustomization(this.agentCustomization);
+    this._applyLocalCustomization();
+  }
+
+  _applyLocalCustomization() {
+    if (!this.localPlayer) return;
+    this.localPlayer.appearance = { ...this.agentCustomization };
+  }
+
+  _getPlayerEffectColor(player) {
+    return player?.appearance
+      ? resolveEffectColor(player.appearance.effectColor)
+      : FACTIONS[player?.faction]?.color;
+  }
+
+  _spawnDeathEffect(player) {
+    const effectColor = this._getPlayerEffectColor(player) ?? FACTIONS[player.faction].color;
+    const deathEffect = player?.appearance?.deathEffect ?? 'burst';
+
+    switch (deathEffect) {
+      case 'nova':
+        return [
+          ...Particle.burst(player.x, player.y, effectColor, 16, {
+            speedMin: 45,
+            speedMax: 180,
+            lifeMin: 0.5,
+            lifeMax: 1.1,
+            sizeMin: 1.8,
+            sizeMax: 3.6,
+            drag: 1.8,
+            gravity: -8,
+          }),
+          ...Particle.ring(player.x, player.y, effectColor, PLAYER_RADIUS * 1.3, {
+            life: 0.9,
+            growth: 150,
+            lineWidth: 4,
+          }),
+        ];
+      case 'shatter':
+        return [
+          ...Particle.burst(player.x, player.y, effectColor, 22, {
+            speedMin: 70,
+            speedMax: 240,
+            lifeMin: 0.45,
+            lifeMax: 1.1,
+            sizeMin: 1.4,
+            sizeMax: 2.8,
+            drag: 1.2,
+            gravity: -14,
+          }),
+          ...Particle.burst(player.x, player.y, FACTIONS[player.faction].color, 10, {
+            speedMin: 35,
+            speedMax: 120,
+            lifeMin: 0.35,
+            lifeMax: 0.75,
+            sizeMin: 1,
+            sizeMax: 2.2,
+            drag: 2.8,
+            gravity: -4,
+          }),
+        ];
+      case 'pulse':
+        return [
+          ...Particle.ring(player.x, player.y, effectColor, PLAYER_RADIUS, {
+            life: 0.55,
+            growth: 175,
+            lineWidth: 3,
+          }),
+          ...Particle.ring(player.x, player.y, effectColor, PLAYER_RADIUS * 0.65, {
+            life: 0.85,
+            growth: 120,
+            lineWidth: 2,
+          }),
+          ...Particle.burst(player.x, player.y, effectColor, 8, {
+            speedMin: 20,
+            speedMax: 90,
+            lifeMin: 0.45,
+            lifeMax: 0.9,
+            sizeMin: 1.8,
+            sizeMax: 3.2,
+            drag: 2.6,
+            gravity: -6,
+          }),
+        ];
+      default:
+        return Particle.burst(player.x, player.y, effectColor, 18, {
+          speedMin: 35,
+          speedMax: 180,
+          lifeMin: 0.6,
+          lifeMax: 1.35,
+          sizeMin: 1.8,
+          sizeMax: 3.8,
+          drag: 2.1,
+          gravity: -6,
+        });
     }
   }
 
@@ -1150,7 +1313,7 @@ export class Game {
       if (player.alive && (buff || guardianBlessing || passiveAura)) {
         player.auraTimer -= dt;
         if (player.auraTimer <= 0) {
-          this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
+          this.sparks.push(...Particle.aura(player.x, player.y, this._getPlayerEffectColor(player), 2));
           player.auraTimer = AURA_EMISSION_INTERVAL;
         }
       }
@@ -1163,6 +1326,7 @@ export class Game {
           this._abilityLatch = true;
           const proj = player.tryAbility(this);
           if (proj) {
+            proj.effectColor = this._getPlayerEffectColor(player);
             if (this._isTutorialMode()) this._tutorialMetrics.usedJobs[player.job] = true;
             this.projectiles.push(proj);
             this.audio.playAbility(player.faction, player.job);
@@ -1180,6 +1344,7 @@ export class Game {
       if (player.alive && Math.random() < AI_ABILITY_CHANCE * (player.abilityDifficultyMult ?? 1)) {
         const proj = player.tryAbility(this);
         if (proj) {
+          proj.effectColor = this._getPlayerEffectColor(player);
           this.projectiles.push(proj);
           this.audio.playAbility(player.faction, player.job);
           this.events.push({
@@ -1818,16 +1983,7 @@ export class Game {
     const killerSide = killerPlayer?.faction ?? killerFaction;
     victim.alive = false;
     victim.respawnTimer = 5 * this._getRespawnTimeMultiplier(victim.faction);
-    this.sparks.push(...Particle.burst(victim.x, victim.y, FACTIONS[victim.faction].color, 18, {
-      speedMin: 35,
-      speedMax: 180,
-      lifeMin: 0.6,
-      lifeMax: 1.35,
-      sizeMin: 1.8,
-      sizeMax: 3.8,
-      drag: 2.1,
-      gravity: -6,
-    }));
+    this.sparks.push(...this._spawnDeathEffect(victim));
 
     // Death penalty: drop ALL carried jewels
     victim.dropAllJewels(this);
@@ -2621,6 +2777,7 @@ export class Game {
         radius: projectile.radius,
         life: round(projectile.life ?? 0),
         maxLife: round(projectile.maxLife ?? 0),
+        effectColor: projectile.effectColor ?? null,
       })),
     };
   }
@@ -2708,6 +2865,7 @@ export class Game {
     this.projectiles = (frame.projectiles ?? []).map(projectile => ({ ...projectile }));
     this.focusedEnemy = this._findPlayerById(frame.focusedEnemyId);
     this.localPlayer = this._findPlayerById(frame.localPlayerId) ?? this.players.find(p => p.faction === 'blue') ?? null;
+    this._applyLocalCustomization();
     this.rallySignal = frame.rallySignal ? { ...frame.rallySignal } : null;
   }
 
