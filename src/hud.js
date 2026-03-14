@@ -7,6 +7,7 @@
 
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
+const DEFAULT_AGENT_LABEL = 'AGENT';
 
 export class HUD {
   constructor() {
@@ -423,14 +424,14 @@ export class HUD {
       const energyPct = Math.round(observed.energy);
       set(
         'spectator-target',
-        `${observed.faction.toUpperCase()} · ${(observed.jobDef?.label ?? 'AGENT').toUpperCase()} #${observed.index + 1}`,
+        `${observed.faction.toUpperCase()} · ${(observed.jobDef?.label ?? DEFAULT_AGENT_LABEL).toUpperCase()} #${observed.index + 1}`,
       );
       set('spectator-health', `${Math.round(observed.health)} / ${observed.maxHealth} (${hpPct}%)`);
       set('spectator-energy', `${energyPct} / 100`);
       set('spectator-cooldown', `${observed.abilityName.toUpperCase()} · ${observed.cooldown.toFixed(1)}s`);
       set('spectator-carry', `${observed.carrying.length} / 5`);
     } else {
-      set('spectator-target', 'NO LIVE AGENT');
+      set('spectator-target', `NO LIVE ${DEFAULT_AGENT_LABEL}`);
       set('spectator-health', '—');
       set('spectator-energy', '—');
       set('spectator-cooldown', '—');

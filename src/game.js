@@ -25,6 +25,7 @@ const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
+const CAMERA_ZOOM_THRESHOLD = 1.001;
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -1255,7 +1256,7 @@ export class Game {
 
   _focusSpectatorCamera(x, y, zoom) {
     const clampedZoom = Math.max(1, zoom);
-    if (clampedZoom <= 1.01) {
+    if (clampedZoom <= CAMERA_ZOOM_THRESHOLD) {
       this.spectatorCamera = {
         x: this.width / 2,
         y: this.height / 2,

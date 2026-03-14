@@ -21,6 +21,7 @@ function withAlpha(hex, a) {
 }
 
 const RING_PARTICLE_ALPHA = 0.95;
+const CAMERA_ZOOM_THRESHOLD = 1.001;
 
 // ── Renderer class ────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ export class Renderer {
 
   _applyCamera(camera, W, H) {
     const zoom = camera?.zoom ?? 1;
-    if (zoom <= 1.001) return;
+    if (zoom <= CAMERA_ZOOM_THRESHOLD) return;
     const x = camera?.x ?? W / 2;
     const y = camera?.y ?? H / 2;
     this.ctx.setTransform(zoom, 0, 0, zoom, W / 2 - x * zoom, H / 2 - y * zoom);
