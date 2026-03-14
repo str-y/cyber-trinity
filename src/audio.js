@@ -11,6 +11,7 @@
  *  playCrystalPickup(tier)        — jewel collected  ('normal' | 'rare' | 'legendary')
  *  playAbility(faction, jobType)  — ability fired     ('blue' | 'green' | 'red')
  *  playElimination()              — agent defeated
+ *  playKillStreak(streakCount)    — killstreak reward cue
  *  playChaosEvent(type)           — chaos event start ('emp_storm' | 'crystal_rain' | 'nexus_overload')
  *  playMatchEnd(faction)          — match over fanfare
  */
@@ -304,6 +305,33 @@ export class AudioEngine {
     gain2.connect(this._sfxGain);
     osc2.start(now);
     osc2.stop(now + 0.20);
+  }
+
+  playKillStreak(streakCount = 2) {
+    if (!this._started) return;
+    const ctx  = this._ctx;
+    const now  = ctx.currentTime;
+    const lead = streakCount >= 5
+      ? [784, 988, 1174]
+      : streakCount >= 3
+        ? [659, 880, 988]
+        : [523, 659];
+
+    for (const [index, freq] of lead.entries()) {
+      const t = now + index * 0.08;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = streakCount >= 5 ? 'sawtooth' : 'triangle';
+      osc.frequency.setValueAtTime(freq * 0.92, t);
+      osc.frequency.exponentialRampToValueAtTime(freq, t + 0.05);
+      gain.gain.setValueAtTime(0.0, t);
+      gain.gain.linearRampToValueAtTime(0.22, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.26);
+      osc.connect(gain);
+      gain.connect(this._sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.26);
+    }
   }
 
   // ── SFX: chaos event ────────────────────────────────────────────────────────

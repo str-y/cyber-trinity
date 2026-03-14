@@ -225,6 +225,17 @@ export class HUD {
       this._allianceEl = allianceEl;
     }
 
+    if (hud) {
+      const momentumBanner = document.createElement('div');
+      momentumBanner.id = 'momentum-banner';
+      momentumBanner.innerHTML = `
+        <div class="momentum-count" id="momentum-count">2 HIT COMBO</div>
+        <div class="momentum-detail" id="momentum-detail">x1.5 SCORE • 10S</div>
+      `;
+      hud.appendChild(momentumBanner);
+      this._momentumBannerEl = momentumBanner;
+    }
+
     // ── Match-end scoreboard ───────────────────────────────────────────────
     const scoreboard = document.getElementById('match-scoreboard');
     if (scoreboard) {
@@ -402,6 +413,7 @@ export class HUD {
 
     // Alliance indicator
     this._updateAlliance(world);
+    this._updateMomentum(world, local);
 
     // Event feed
     this._updateFeed(world);
@@ -662,6 +674,48 @@ export class HUD {
         </span>
       </div>
     `;
+  }
+
+  _updateMomentum(world, local) {
+    if (!this._momentumBannerEl) return;
+    if (!local || world.spectatorMode || !local.alive) {
+      this._momentumBannerEl.classList.remove('active', 'flash');
+      this._momentumBannerEl.style.display = 'none';
+      return;
+    }
+
+    const comboActive = (local.comboCount ?? 0) > 1 && (local.comboTimer ?? 0) > 0;
+    const noticeActive = (local.momentumNoticeTimer ?? 0) > 0;
+    const cooldownReady = !!local.instantCooldownReady;
+    if (!comboActive && !noticeActive && !cooldownReady) {
+      this._momentumBannerEl.classList.remove('active', 'flash');
+      this._momentumBannerEl.style.display = 'none';
+      return;
+    }
+
+    const countEl = document.getElementById('momentum-count');
+    const detailEl = document.getElementById('momentum-detail');
+    if (!countEl || !detailEl) return;
+
+    this._momentumBannerEl.style.display = 'flex';
+    this._momentumBannerEl.classList.add('active');
+    this._momentumBannerEl.classList.toggle('flash', (local.comboFlashTimer ?? 0) > 0);
+
+    if (comboActive) {
+      countEl.textContent = `${local.comboCount} HIT COMBO`;
+      const detailParts = [];
+      if (noticeActive && local.momentumNotice) detailParts.push(local.momentumNotice);
+      detailParts.push(`${this._formatMultiplier(local.comboMultiplier ?? 1)} SCORE`);
+      detailParts.push(`${Math.ceil(local.comboTimer ?? 0)}S`);
+      detailEl.textContent = detailParts.join(' • ');
+    } else {
+      countEl.textContent = local.momentumNotice || 'MOMENTUM ONLINE';
+      detailEl.textContent = local.momentumDetail || (cooldownReady ? 'NEXT ABILITY RESET READY' : '');
+    }
+  }
+
+  _formatMultiplier(multiplier) {
+    return `x${Number.isInteger(multiplier) ? multiplier : multiplier.toFixed(1)}`;
   }
 
   _updateChaosEvent(world) {
