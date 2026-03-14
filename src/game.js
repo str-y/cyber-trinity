@@ -26,6 +26,35 @@ const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
 const CAMERA_ZOOM_THRESHOLD = 1.001;
+const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
+const BASE_ALERT_RANGE = BASE_RADIUS + 84;
+const BASE_ALERT_COOLDOWN = 5;
+const DEATH_MARKER_DURATION = 5;
+const PIN_DURATION = 10;
+const NEXUS_GUARDIAN_INITIAL_SPAWN = 120;
+const NEXUS_GUARDIAN_RESPAWN_TIME = 240;
+const NEXUS_GUARDIAN_BASE_HEALTH = 2400;
+const NEXUS_GUARDIAN_HEALTH_SCALE = 1.5;
+const NEXUS_GUARDIAN_RADIUS = 70;
+const NEXUS_GUARDIAN_ARENA_RADIUS = 120;
+const NEXUS_GUARDIAN_ATTACK_INTERVAL = 4.2;
+const NEXUS_GUARDIAN_AOE_RADIUS = 150;
+const NEXUS_GUARDIAN_AOE_DAMAGE = 26;
+const NEXUS_GUARDIAN_TARGET_DAMAGE = 42;
+const NEXUS_GUARDIAN_DPS_PER_PLAYER = 22;
+const NEXUS_GUARDIAN_REQUIRED_ATTACKERS = 2;
+const GUARDIAN_BLESSING_DURATION = 60;
+const GUARDIAN_BLESSING = {
+  speedMult: 1.15,
+  crystalPickupRangeMult: 1.5,
+  respawnTimeMult: 0.5,
+};
+
+const PIN_TYPES = {
+  gather:  { label: '集合', emoji: '📍', radius: 130 },
+  danger:  { label: '危険', emoji: '⚠️', radius: 165 },
+  crystal: { label: 'クリスタル', emoji: '💎', radius: 140 },
+};
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -94,14 +123,41 @@ const FEATURE_CONTRACTS = [
   },
 ];
 
+// ── AI difficulty parameters ───────────────────────────────────────────────
+const AI_DIFFICULTY = {
+  easy:   { speedMult: 0.70, aggroMult: 0.60, abilityMult: 0.40 },
+  normal: { speedMult: 1.00, aggroMult: 1.00, abilityMult: 1.00 },
+  hard:   { speedMult: 1.20, aggroMult: 1.30, abilityMult: 1.60 },
+  expert: { speedMult: 1.40, aggroMult: 1.60, abilityMult: 2.20 },
+};
+
+// ── Starting crystal counts ────────────────────────────────────────────────
+const STARTING_CRYSTALS = { low: 6, normal: 12, high: 20 };
+
 export class Game {
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas   = canvas;
     this.renderer = new Renderer(canvas);
     this.hud      = new HUD();
     this.audio    = new AudioEngine();
     this.running  = false;
     this._lastTs  = 0;
+    this.playerFaction = options.playerFaction ?? 'blue';
+
+    // ── Lobby config (all settings from the pre-match lobby) ───────────────
+    this.config = {
+      matchDuration:      options.matchDuration      ?? MATCH_DURATION,
+      winScore:           options.winScore           ?? 0,
+      chaosEnabled:       options.chaosEnabled       ?? true,
+      chaosInterval:      options.chaosInterval      ?? CHAOS_EVENT_INTERVAL,
+      gameMode:           options.gameMode           ?? 'standard',
+      startingCrystals:   options.startingCrystals   ?? 'normal',
+      aiDifficulty: {
+        blue:  options.aiDifficulty?.blue  ?? 'normal',
+        green: options.aiDifficulty?.green ?? 'normal',
+        red:   options.aiDifficulty?.red   ?? 'normal',
+      },
+    };
 
     this.width  = 0;
     this.height = 0;
@@ -127,7 +183,7 @@ export class Game {
     this.winnerFaction = null;
     this.victoryTimer = 0;
     this.elapsed = 0;
-    this.matchTimer = MATCH_DURATION;   // countdown (seconds)
+    this.matchTimer = this.config.matchDuration;   // countdown (seconds)
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({
       ...c,
@@ -138,6 +194,7 @@ export class Game {
 
     // Active faction buffs: { blue: { speedMult, regenMult, … , timer }, … }
     this.factionBuffs = {};
+    this.guardianBlessings = {};
     this.localPlayer = null;
     this.spectatorMode = false;
     this.spectatorCameraMode = 'overhead';
@@ -159,6 +216,13 @@ export class Game {
     this._rallyLatch = false;
     this.focusedEnemy = null;
     this.rallySignal = null;
+    this.minimapPins = [];
+    this.recentDeaths = [];
+    this.baseAttackAlerts = {
+      blue: { active: false, cooldown: 0 },
+      green: { active: false, cooldown: 0 },
+      red: { active: false, cooldown: 0 },
+    };
     this._bindInput();
 
     // ── Alliance (temporary 2-vs-1 pact) ─────────────────────────────────
@@ -169,6 +233,7 @@ export class Game {
     this.chaosEvent = null;          // active event object or null
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;  // countdown to next event
     this._crystalRainAccum = 0;      // accumulator for crystal rain spawns
+    this.nexusGuardian = null;
 
     // ── Jewel respawn timer ─────────────────────────────────────────────────
     this._jewelRespawnAccum = 0;
@@ -198,6 +263,7 @@ export class Game {
     if (Object.keys(this.bases).length > 0) {
       this._positionBases();
       if (this.trilocks.length > 0) this._positionTriLocks();
+      this._positionNexusGuardian();
     }
     this._updateSpectatorState(0);
   }
@@ -212,24 +278,37 @@ export class Game {
 
     // ── TriLock neutral bases ───────────────────────────────────────────
     this._spawnTriLocks();
+    this._resetNexusGuardian();
 
-    // ── Players (5 per faction) ───────────────────────────────────────────
+    // ── Players (playersPerFaction per faction) ───────────────────────────
+    const playersPerFaction = this.config.gameMode === 'quick' ? 2 : 5;
     for (const faction of ['blue', 'green', 'red']) {
       const base = this.bases[faction];
-      for (let i = 0; i < 5; i++) {
-        const angle = (i / 5) * Math.PI * 2;
+      const diff = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
+      for (let i = 0; i < playersPerFaction; i++) {
+        const angle = (i / playersPerFaction) * Math.PI * 2;
         const r     = 40 + Math.random() * 20;
         const p = new Player(
           faction, i,
           base.x + Math.cos(angle) * r,
           base.y + Math.sin(angle) * r,
         );
+        // Apply AI difficulty scaling only to non-player-controlled agents.
+        // The human player is the first member (i === 0) of their chosen faction.
+        const isHumanPlayer = faction === this.playerFaction && i === 0;
+        if (!isHumanPlayer) {
+          p.speed                = Math.round(p.speed * diff.speedMult);
+          p.aggro                = Math.min(1, p.aggro * diff.aggroMult);
+          p.abilityDifficultyMult = diff.abilityMult;  // per-frame ability chance scalar
+        }
         // Stagger cooldowns
         p.cooldown = Math.random() * p.abilityMax;
         this.players.push(p);
       }
     }
-    this.localPlayer = this.players.find(p => p.faction === 'blue') ?? null;
+    this.localPlayer = this.players.find(p => p.faction === this.playerFaction)
+      ?? this.players.find(p => p.faction === 'blue')
+      ?? null;
     if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
     this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
     this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
@@ -289,6 +368,14 @@ export class Game {
     window.addEventListener('keyup', e => {
       if (setKey(e.code, false)) e.preventDefault();
     });
+    this.canvas.addEventListener('click', e => this._handleCanvasClick(e));
+  }
+
+  _handleCanvasClick(event) {
+    const point = this.renderer.screenToMinimapWorld?.(event.clientX, event.clientY, this);
+    if (!point) return;
+    this._issueMinimapPin(point.x, point.y);
+    event.preventDefault();
   }
 
   _positionBases() {
@@ -342,14 +429,47 @@ export class Game {
     }
   }
 
+  _guardianSpawnPoint() {
+    return { x: this.width / 2, y: this.height / 2 };
+  }
+
+  _resetNexusGuardian() {
+    const { x, y } = this._guardianSpawnPoint();
+    this.nexusGuardian = {
+      x,
+      y,
+      radius: NEXUS_GUARDIAN_RADIUS,
+      arenaRadius: NEXUS_GUARDIAN_ARENA_RADIUS,
+      aoeRadius: NEXUS_GUARDIAN_AOE_RADIUS,
+      state: 'pending',
+      timer: NEXUS_GUARDIAN_INITIAL_SPAWN,
+      health: 0,
+      maxHealth: NEXUS_GUARDIAN_BASE_HEALTH,
+      spawnCount: 0,
+      attackTimer: NEXUS_GUARDIAN_ATTACK_INTERVAL,
+      nextAttack: 'aoe',
+      damageByFaction: { blue: 0, green: 0, red: 0 },
+      lastDamager: null,
+    };
+  }
+
+  _positionNexusGuardian() {
+    if (!this.nexusGuardian) return;
+    const { x, y } = this._guardianSpawnPoint();
+    this.nexusGuardian.x = x;
+    this.nexusGuardian.y = y;
+  }
+
   /**
    * Spawn jewels with value tiers. Higher-value jewels spawn closer to the centre.
    * Uses the JEWEL_TIERS weight distribution and distance-from-centre bias.
+   * Count is determined by the lobby startingCrystals config.
    */
   _spawnInitialJewels() {
     const W = this.width, H = this.height;
     const cx = W / 2, cy = H / 2;
-    for (let i = 0; i < CRYSTAL_COUNT; i++) {
+    const count = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    for (let i = 0; i < count; i++) {
       this.crystals.push(this._createJewel(cx, cy, W, H));
     }
   }
@@ -434,15 +554,18 @@ export class Game {
 
     // TriLock capture logic
     this._updateTriLocks(dt);
+    this._updateNexusGuardian(dt);
 
     // Alliance evaluation (before AI so targeting reflects current pact)
     this._updateAlliance();
     this._updateCommandState(dt);
+    this._updateMinimapAlerts(dt);
 
     // Players
     for (const player of this.players) {
       if (player.isPlayerControlled && !this.spectatorMode) this._updateLocalPlayer(player, dt);
       else player.update(dt, this);
+      this._updatePassiveEffects(player, dt);
       // Energy regeneration (buffed by faction overclock, blocked by EMP Storm)
       if (player.alive && player.energy < 100) {
         let regenBlocked = false;
@@ -459,6 +582,10 @@ export class Game {
           player.energy = Math.min(100, player.energy + 8 * regenMult * dt);
         }
       }
+      if (player.alive && player.passiveState?.bioRegenActive) {
+        const regenPerSec = player.maxHealth * (player.passive.regenPctPerSec ?? 0);
+        player.health = Math.min(player.maxHealth, player.health + regenPerSec * dt);
+      }
       // Faction heal-over-time buff (Deploy Firewall)
       const healBuff = this.factionBuffs[player.faction]?.healPerSec;
       if (player.alive && healBuff) {
@@ -466,7 +593,13 @@ export class Game {
       }
 
       const buff = this.factionBuffs[player.faction];
-      if (player.alive && buff) {
+      const guardianBlessing = this.guardianBlessings[player.faction];
+      const passiveAura = player.passiveState?.deliveryBonusActive ||
+        player.passiveState?.bioRegenActive ||
+        player.passiveState?.nearbyAllyBonus ||
+        player.passiveState?.overclockStacks > 0 ||
+        player.passiveState?.sprintActive;
+      if (player.alive && (buff || guardianBlessing || passiveAura)) {
         player.auraTimer -= dt;
         if (player.auraTimer <= 0) {
           this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
@@ -495,7 +628,7 @@ export class Game {
         }
         continue;
       }
-      if (player.alive && Math.random() < AI_ABILITY_CHANCE) {
+      if (player.alive && Math.random() < AI_ABILITY_CHANCE * (player.abilityDifficultyMult ?? 1)) {
         const proj = player.tryAbility(this);
         if (proj) {
           this.projectiles.push(proj);
@@ -517,16 +650,18 @@ export class Game {
 
     // Next feature contract (who/when/what + completion effects)
     this._updateNextFeature(dt);
+    this._updateGuardianBlessings(dt);
 
     // Chaos events (EMP Storm, Crystal Rain, Nexus Overload)
     this._updateChaosEvents(dt);
 
     // Re-spawn delivered jewels (value-tiered, centre-weighted)
     const active = this.crystals.filter(c => !c.delivered);
-    if (active.length < CRYSTAL_COUNT * 0.5) {
+    const crystalTarget = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    if (active.length < crystalTarget * 0.5) {
       this.crystals = this.crystals.filter(c => !c.delivered);
       const cx = this.width / 2, cy = this.height / 2;
-      const toSpawn = CRYSTAL_COUNT - this.crystals.length;
+      const toSpawn = crystalTarget - this.crystals.length;
       for (let i = 0; i < toSpawn; i++) {
         this.crystals.push(this._createJewel(cx, cy, this.width, this.height));
       }
@@ -605,6 +740,7 @@ export class Game {
       player.respawnTimer -= dt;
       if (player.respawnTimer <= 0) {
         player.alive = true;
+        player.maxHealth = player.baseMaxHealth;
         player.health = player.maxHealth;
         const base = this.bases[player.faction];
         player.x = base.x + (Math.random() - 0.5) * 60;
@@ -618,7 +754,9 @@ export class Game {
 
     const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
-    const speedMult = this.factionBuffs?.[player.faction]?.speedMult ?? 1;
+    const speedMult = (this.factionBuffs?.[player.faction]?.speedMult ?? 1) *
+      (player.passiveState?.speedMult ?? 1) *
+      this._getGuardianBlessing(player.faction).speedMult;
     const effSpeed = player.speed * speedMult;
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy) || 1;
@@ -641,7 +779,7 @@ export class Game {
         let totalScore = 0;
         for (const jewel of player.carrying) {
           const pts = deliveryBase.deliverJewel(jewel.value);
-          totalScore += pts;
+          totalScore += this._applyDeliveryPassive(player, deliveryBase, pts);
           jewel.delivered = true;
           this.sparks.push(...Particle.burst(deliveryBase.x, deliveryBase.y, jewel.tierColor, 5, {
             speedMin: 70,
@@ -675,7 +813,7 @@ export class Game {
       const nearest = this._nearestFreeCrystal(player.x, player.y, player);
       if (nearest) {
         const d = Math.hypot(player.x - nearest.x, player.y - nearest.y);
-        if (d < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
+        if (d < this._getCrystalPickupRadius(player.faction)) {
           nearest.carrier = player;
           nearest.pickupLockOwner = null;
           nearest.pickupLockTimer = 0;
@@ -711,10 +849,12 @@ export class Game {
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
           this._registerDamage(p, proj.faction);
+          proj.owner?.markCombat(this.elapsed);
+          p.markCombat(this.elapsed);
           p.health -= proj.damage;
           this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
           if (p.health <= 0) {
-            this._recordElimination(p, proj.faction, 'ability KO');
+            this._recordElimination(p, proj.owner ?? proj.faction, 'ability KO');
           }
           proj.hit = true;
           break;
@@ -766,9 +906,18 @@ export class Game {
     }
   }
 
+  _updateGuardianBlessings(dt) {
+    for (const [faction, buff] of Object.entries(this.guardianBlessings)) {
+      buff.timer -= dt;
+      if (buff.timer <= 0) delete this.guardianBlessings[faction];
+    }
+  }
+
   // ── Chaos Events ─────────────────────────────────────────────────────────
 
   _updateChaosEvents(dt) {
+    if (!this.config.chaosEnabled) return;
+
     // Tick active event
     if (this.chaosEvent) {
       this.chaosEvent.remaining -= dt;
@@ -791,7 +940,7 @@ export class Game {
           ttl: 3,
         });
         this.chaosEvent = null;
-        this.chaosEventTimer = CHAOS_EVENT_INTERVAL;
+        this.chaosEventTimer = this.config.chaosInterval;
       }
       return;
     }
@@ -836,8 +985,10 @@ export class Game {
   }
 
   _recordElimination(victim, killerFaction, reason = 'eliminated') {
+    const killerPlayer = typeof killerFaction === 'string' ? null : killerFaction;
+    const killerSide = killerPlayer?.faction ?? killerFaction;
     victim.alive = false;
-    victim.respawnTimer = 5;
+    victim.respawnTimer = 5 * this._getRespawnTimeMultiplier(victim.faction);
     this.sparks.push(...Particle.burst(victim.x, victim.y, FACTIONS[victim.faction].color, 18, {
       speedMin: 35,
       speedMax: 180,
@@ -851,21 +1002,41 @@ export class Game {
 
     // Death penalty: drop ALL carried jewels
     victim.dropAllJewels(this);
-
-    this.audio.playElimination();
-    this.stats[killerFaction].kills++;
-    this.stats[victim.faction].deaths++;
-    this.scores[killerFaction] += KILL_SCORE;
-    this.events.push({
-      text: `${killerFaction.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
-      faction: killerFaction,
-      ttl: 3,
+    this.recentDeaths.push({
+      x: victim.x,
+      y: victim.y,
+      faction: victim.faction,
+      timer: DEATH_MARKER_DURATION,
     });
 
+    this.audio.playElimination();
+    if (killerPlayer?.passive?.id === 'overclock') {
+      killerPlayer.passiveState.overclockStacks = Math.min(
+        killerPlayer.passive.maxStacks,
+        (killerPlayer.passiveState.overclockStacks ?? 0) + 1,
+      );
+    }
+    this.stats[victim.faction].deaths++;
+    if (killerSide && this.stats[killerSide]) {
+      this.stats[killerSide].kills++;
+      this.scores[killerSide] += KILL_SCORE;
+      this.events.push({
+        text: `${killerSide.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
+        faction: killerSide,
+        ttl: 3,
+      });
+    } else {
+      this.events.push({
+        text: `☠️ NEXUS GUARDIAN eliminated ${victim.faction.toUpperCase()}`,
+        faction: victim.faction,
+        ttl: 3,
+      });
+    }
+
     const ledger = this.damageLedger.get(victim);
-    if (ledger) {
+    if (ledger && killerSide && this.stats[killerSide]) {
       for (const [assistFaction, hitTime] of ledger.entries()) {
-        if (assistFaction === killerFaction) continue;
+        if (assistFaction === killerSide) continue;
         if ((this.elapsed - hitTime) > ASSIST_WINDOW) continue;
         this.stats[assistFaction].assists++;
         this.scores[assistFaction] += ASSIST_SCORE;
@@ -882,7 +1053,26 @@ export class Game {
 
   _checkMatchEnd() {
     if (this.matchEnded) return;
-    // Time-based match end (5 minutes) — winner has the most points
+
+    // Score-based match end (when winScore > 0 and a faction reaches it)
+    if (this.config.winScore > 0) {
+      for (const faction of ['blue', 'green', 'red']) {
+        if ((this.scores[faction] ?? 0) >= this.config.winScore) {
+          this.matchEnded = true;
+          this.winnerFaction = faction;
+          this.victoryTimer = 5;
+          this.audio.playMatchEnd(this.winnerFaction);
+          this.events.push({
+            text: `🏆 ${this.winnerFaction.toUpperCase()} reached ${this.config.winScore} pts — VICTORY!`,
+            faction: this.winnerFaction,
+            ttl: 5,
+          });
+          return;
+        }
+      }
+    }
+
+    // Time-based match end — winner has the most points
     if (this.matchTimer <= 0) {
       this.matchEnded = true;
       const ranking = ['blue', 'green', 'red']
@@ -911,23 +1101,32 @@ export class Game {
     this.winnerFaction = null;
     this.victoryTimer = 0;
     this.elapsed = 0;
-    this.matchTimer = MATCH_DURATION;
+    this.matchTimer = this.config.matchDuration;
     this.events = [];
     this.projectiles = [];
     this.sparks = [];
     this.damageLedger = new Map();
     this.factionBuffs = {};
+    this.guardianBlessings = {};
     this._jewelRespawnAccum = 0;
     this.alliance = null;
     this.focusedEnemy = null;
     this.rallySignal = null;
     this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
     this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+    this.minimapPins = [];
+    this.recentDeaths = [];
+    this.baseAttackAlerts = {
+      blue: { active: false, cooldown: 0 },
+      green: { active: false, cooldown: 0 },
+      red: { active: false, cooldown: 0 },
+    };
 
     // Reset chaos events
     this.chaosEvent = null;
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;
     this._crystalRainAccum = 0;
+    this._resetNexusGuardian();
 
     // Reset feature contracts
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({
@@ -938,19 +1137,29 @@ export class Game {
     this.featureIndex = 0;
 
     // Reset players
+    const playersPerFaction = this.config.gameMode === 'quick' ? 2 : 5;
     for (const player of this.players) {
       const base = this.bases[player.faction];
-      const angle = (player.index / 5) * Math.PI * 2;
+      const angle = (player.index / playersPerFaction) * Math.PI * 2;
       const r = 40 + Math.random() * 20;
       player.x = base.x + Math.cos(angle) * r;
       player.y = base.y + Math.sin(angle) * r;
-      player.health = player.maxHealth;
+      player.health = player.baseMaxHealth;
+      player.maxHealth = player.baseMaxHealth;
       player.energy = 100;
       player.alive = true;
       player.respawnTimer = 0;
       player.carrying = [];
       player.cooldown = Math.random() * player.abilityMax;
       player.trailPoints = [];
+      player.lastCombatTime = -Infinity;
+      player.passiveState.deliveryBonusActive = false;
+      player.passiveState.bioRegenActive = false;
+      player.passiveState.bioRegenDelayRemaining = 0;
+      player.passiveState.nearbyAllyBonus = false;
+      player.passiveState.overclockStacks = 0;
+      player.passiveState.speedMult = 1;
+      player.passiveState.sprintActive = false;
     }
 
     // Reset home bases
@@ -1010,6 +1219,19 @@ export class Game {
     return best;
   }
 
+  _nearestFreeCrystalInZone(x, y, radius = Infinity) {
+    let best = null, bestD = Infinity;
+    for (const c of this.crystals) {
+      if (c.delivered || c.carrier) continue;
+      const dx = c.x - x, dy = c.y - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > radius || d >= bestD) continue;
+      best = c;
+      bestD = d;
+    }
+    return best;
+  }
+
   /** Return the nearest base (home or TriLock) owned by the given faction. */
   _nearestOwnedBase(x, y, faction) {
     let best = null, bestD = Infinity;
@@ -1027,6 +1249,85 @@ export class Game {
       if (d < bestD) { bestD = d; best = tl; }
     }
     return best;
+  }
+
+  _getGuardianBlessing(faction) {
+    return this.guardianBlessings[faction] ?? {
+      speedMult: 1,
+      crystalPickupRangeMult: 1,
+      respawnTimeMult: 1,
+    };
+  }
+
+  _getCrystalPickupRadius(faction) {
+    return (PLAYER_RADIUS + CRYSTAL_RADIUS + 2) * this._getGuardianBlessing(faction).crystalPickupRangeMult;
+  }
+
+  _getRespawnTimeMultiplier(faction) {
+    return this._getGuardianBlessing(faction).respawnTimeMult;
+  }
+
+  _updatePassiveEffects(player, dt) {
+    const state = player.passiveState;
+    if (!state) return;
+
+    state.deliveryBonusActive = false;
+    state.bioRegenActive = false;
+    state.speedMult = 1;
+    state.sprintActive = false;
+    state.minimapVisionRadius = player.passive?.minimapVisionRadius ?? 240;
+
+    if (!player.alive) {
+      player.maxHealth = player.baseMaxHealth;
+      state.nearbyAllyBonus = false;
+      state.bioRegenDelayRemaining = 0;
+      return;
+    }
+
+    if (player.passive?.id === 'data-cache') {
+      const ownedBase = this._nearestOwnedBase(player.x, player.y, player.faction);
+      state.deliveryBonusActive = !!ownedBase &&
+        Math.hypot(player.x - ownedBase.x, player.y - ownedBase.y) <= ownedBase.radius;
+      return;
+    }
+
+    if (player.passive?.id === 'bio-regen') {
+      const adjacentRange = player.radius * 3.5;
+      const adjacentAlly = this.players.some(other =>
+        other !== player &&
+        other.alive &&
+        other.faction === player.faction &&
+        Math.hypot(player.x - other.x, player.y - other.y) <= adjacentRange,
+      );
+      state.nearbyAllyBonus = adjacentAlly;
+      player.maxHealth = Math.round(player.baseMaxHealth * (
+        adjacentAlly ? 1 + player.passive.allyMaxHealthBonus : 1
+      ));
+      if (player.health > player.maxHealth) player.health = player.maxHealth;
+      const elapsedSinceCombat = this.elapsed - player.lastCombatTime;
+      state.bioRegenDelayRemaining = Math.max(0, player.passive.regenDelay - elapsedSinceCombat);
+      state.bioRegenActive = elapsedSinceCombat >= player.passive.regenDelay &&
+        player.health < player.maxHealth;
+      return;
+    }
+
+    if (player.passive?.id === 'overclock') {
+      state.sprintActive = Math.hypot(player.vx, player.vy) >
+        player.speed * SPRINT_ACTIVATION_SPEED_RATIO;
+      state.speedMult = state.sprintActive ? player.passive.sprintSpeedMult : 1;
+      state.overclockStacks = Math.min(player.passive.maxStacks, state.overclockStacks ?? 0);
+      return;
+    }
+
+    player.maxHealth = player.baseMaxHealth;
+  }
+
+  _applyDeliveryPassive(player, base, points) {
+    if (player.passive?.id !== 'data-cache') return points;
+    const inRange = Math.hypot(player.x - base.x, player.y - base.y) <= base.radius;
+    if (!inRange) return points;
+    player.passiveState.deliveryBonusActive = true;
+    return Math.round(points * player.passive.deliveryBonusMult);
   }
 
   /** Return the faction currently in the lead (highest score). */
@@ -1092,6 +1393,10 @@ export class Game {
       this.rallySignal.timer = Math.max(0, this.rallySignal.timer - dt);
       if (this.rallySignal.timer <= 0) this.rallySignal = null;
     }
+    this.minimapPins = this.minimapPins.filter(pin => {
+      pin.timer = Math.max(0, pin.timer - dt);
+      return pin.timer > 0;
+    });
 
     if (this.spectatorMode) {
       this.focusedEnemy = null;
@@ -1211,96 +1516,247 @@ export class Game {
     });
   }
 
-  _cycleSpectatorCameraMode() {
-    if (!this.spectatorMode) return;
-    const modes = ['overhead', 'follow', 'free'];
-    const index = modes.indexOf(this.spectatorCameraMode);
-    this.spectatorCameraMode = modes[(index + 1) % modes.length];
-    if (this.spectatorCameraMode === 'overhead') {
-      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
-    } else if (this.spectatorCameraMode === 'follow' && this.spectatorTarget) {
-      this._focusSpectatorCamera(this.spectatorTarget.x, this.spectatorTarget.y, 1.8);
-    } else if (this.spectatorCameraMode === 'free') {
-      const target = this.spectatorTarget ?? this.localPlayer;
-      if (target) this._focusSpectatorCamera(target.x, target.y, 1.35);
-    }
+  _issueMinimapPin(x, y) {
+    const player = this.localPlayer;
+    if (!player?.alive) return;
+    const type = this.hud.getSelectedPinType?.() ?? 'gather';
+    const spec = PIN_TYPES[type] ?? PIN_TYPES.gather;
+    this.minimapPins = this.minimapPins.filter(pin => pin.faction !== player.faction);
+    this.minimapPins.push({
+      faction: player.faction,
+      type,
+      x,
+      y,
+      radius: spec.radius,
+      timer: PIN_DURATION,
+    });
     this.events.push({
-      text: `📷 Spectator camera: ${this.spectatorCameraMode.toUpperCase()}`,
-      faction: 'blue',
-      ttl: 2,
+      text: `${spec.emoji} ${player.faction.toUpperCase()} issued ${spec.label} pin`,
+      faction: player.faction,
+      ttl: 3,
     });
   }
 
-  _cycleSpectatorTarget(direction = 1) {
-    if (!this.spectatorMode) return;
-    const candidates = this.players.filter(player => player.alive);
-    if (candidates.length === 0) {
-      this.spectatorTarget = null;
-      return;
-    }
+  _getActivePinForFaction(faction) {
+    return this.minimapPins.find(pin => pin.faction === faction) ?? null;
+  }
 
-    let nextIndex = candidates.indexOf(this.spectatorTarget);
-    if (direction === 0) {
-      nextIndex = Math.max(0, candidates.indexOf(this.localPlayer));
-    } else if (nextIndex === -1) {
-      nextIndex = 0;
-    } else {
-      nextIndex = (nextIndex + direction + candidates.length) % candidates.length;
+  _updateMinimapAlerts(dt) {
+    this.recentDeaths = this.recentDeaths.filter(marker => {
+      marker.timer = Math.max(0, marker.timer - dt);
+      return marker.timer > 0;
+    });
+    for (const alert of Object.values(this.baseAttackAlerts)) {
+      alert.cooldown = Math.max(0, alert.cooldown - dt);
     }
-
-    this.spectatorTarget = candidates[nextIndex];
-    if (this.spectatorCameraMode === 'follow') {
-      this._focusSpectatorCamera(this.spectatorTarget.x, this.spectatorTarget.y, 1.8);
+    for (const faction of ['blue', 'green', 'red']) {
+      const base = this.bases[faction];
+      const alert = this.baseAttackAlerts[faction];
+      const underAttack = this.players.some(player =>
+        player.alive &&
+        player.faction !== faction &&
+        !this._isAlly(faction, player.faction) &&
+        Math.hypot(player.x - base.x, player.y - base.y) <= BASE_ALERT_RANGE,
+      );
+      alert.active = underAttack;
+      if (underAttack && alert.cooldown <= 0) {
+        alert.cooldown = BASE_ALERT_COOLDOWN;
+        this.events.push({
+          text: `🚨 ${faction.toUpperCase()} base under attack`,
+          faction,
+          ttl: 2.5,
+        });
+      }
     }
   }
 
-  _focusSpectatorCamera(x, y, zoom) {
-    const clampedZoom = Math.max(1, zoom);
-    if (clampedZoom <= CAMERA_ZOOM_THRESHOLD) {
-      this.spectatorCamera = {
-        x: this.width / 2,
-        y: this.height / 2,
-        zoom: 1,
-      };
-      return this.spectatorCamera;
-    }
-
-    const halfViewW = this.width / (2 * clampedZoom);
-    const halfViewH = this.height / (2 * clampedZoom);
-    this.spectatorCamera = {
-      x: Math.max(halfViewW, Math.min(this.width - halfViewW, x)),
-      y: Math.max(halfViewH, Math.min(this.height - halfViewH, y)),
-      zoom: clampedZoom,
-    };
-    return this.spectatorCamera;
-  }
-
-  _updateSpectatorState(dt) {
-    if (!this.spectatorMode) return;
-
-    if (this.spectatorTarget && !this.spectatorTarget.alive) {
-      this._cycleSpectatorTarget(1);
-    }
-
-    if (this.spectatorCameraMode === 'overhead') {
-      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
-      return;
-    }
-
-    if (this.spectatorCameraMode === 'follow') {
-      const target = this.spectatorTarget ?? this.localPlayer;
-      if (target) this._focusSpectatorCamera(target.x, target.y, 1.8);
-      return;
-    }
-
-    const panX = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
-    const panY = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
-    const speed = 320;
-    this._focusSpectatorCamera(
-      this.spectatorCamera.x + panX * speed * dt,
-      this.spectatorCamera.y + panY * speed * dt,
-      1.35,
+  _spawnNexusGuardian() {
+    const guardian = this.nexusGuardian;
+    if (!guardian) return;
+    guardian.state = 'active';
+    guardian.spawnCount += 1;
+    guardian.maxHealth = Math.round(
+      NEXUS_GUARDIAN_BASE_HEALTH * (NEXUS_GUARDIAN_HEALTH_SCALE ** (guardian.spawnCount - 1)),
     );
+    guardian.health = guardian.maxHealth;
+    guardian.attackTimer = NEXUS_GUARDIAN_ATTACK_INTERVAL;
+    guardian.nextAttack = 'aoe';
+    guardian.damageByFaction = { blue: 0, green: 0, red: 0 };
+    guardian.lastDamager = null;
+    this.events.push({
+      text: '🛡️ NEXUS GUARDIAN has materialized at the map center',
+      faction: 'blue',
+      ttl: 4,
+    });
+    this.sparks.push(...Particle.ring(guardian.x, guardian.y, '#7de6ff', guardian.radius * 0.9, {
+      life: 1.1,
+      growth: 180,
+      lineWidth: 5,
+      gravity: 0,
+    }));
+  }
+
+  _guardianWinningFaction(guardian) {
+    const ranking = ['blue', 'green', 'red']
+      .map(faction => ({ faction, damage: guardian.damageByFaction[faction] ?? 0 }))
+      .sort((a, b) => b.damage - a.damage);
+    if ((ranking[0]?.damage ?? 0) > 0) return ranking[0].faction;
+    return guardian.lastDamager;
+  }
+
+  _dropGuardianCrystals(guardian) {
+    const legendary = JEWEL_TIERS.find(tier => tier.tier === 'legendary') ??
+      JEWEL_TIERS.reduce((best, tier) => (tier.value > best.value ? tier : best), JEWEL_TIERS[0]);
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2 - Math.PI / 2;
+      const radius = guardian.radius + 22;
+      this.crystals.push(new MemoryCrystal(
+        guardian.x + Math.cos(angle) * radius,
+        guardian.y + Math.sin(angle) * radius,
+        legendary,
+      ));
+    }
+  }
+
+  _grantGuardianBlessing(faction) {
+    if (!faction) return;
+    this.guardianBlessings[faction] = {
+      ...GUARDIAN_BLESSING,
+      timer: GUARDIAN_BLESSING_DURATION,
+    };
+  }
+
+  _defeatNexusGuardian() {
+    const guardian = this.nexusGuardian;
+    if (!guardian) return;
+    const winnerFaction = this._guardianWinningFaction(guardian);
+    guardian.state = 'respawning';
+    guardian.timer = NEXUS_GUARDIAN_RESPAWN_TIME;
+    guardian.health = 0;
+    guardian.damageByFaction = { blue: 0, green: 0, red: 0 };
+    guardian.attackTimer = NEXUS_GUARDIAN_ATTACK_INTERVAL;
+    guardian.nextAttack = 'aoe';
+    guardian.lastDamager = null;
+    this._dropGuardianCrystals(guardian);
+    this._grantGuardianBlessing(winnerFaction);
+    this.events.push({
+      text: `🏆 ${(winnerFaction ?? 'NEUTRAL').toUpperCase()} defeated the NEXUS GUARDIAN`,
+      faction: winnerFaction ?? 'blue',
+      ttl: 4,
+    });
+    if (winnerFaction) {
+      this.events.push({
+        text: `✨ ${winnerFaction.toUpperCase()} gained GUARDIAN'S BLESSING (${GUARDIAN_BLESSING_DURATION}s)`,
+        faction: winnerFaction,
+        ttl: 4,
+      });
+    }
+    this.sparks.push(...Particle.burst(guardian.x, guardian.y, '#7de6ff', 24, {
+      speedMin: 80,
+      speedMax: 260,
+      lifeMin: 0.8,
+      lifeMax: 1.5,
+      sizeMin: 2.2,
+      sizeMax: 5.2,
+      gravity: -18,
+    }));
+  }
+
+  _applyGuardianDamage(player, damage) {
+    player.markCombat(this.elapsed);
+    player.health -= damage;
+    if (player.health <= 0) this._recordElimination(player, null);
+  }
+
+  _nexusGuardianAttack(playersInArena) {
+    const guardian = this.nexusGuardian;
+    if (!guardian || guardian.state !== 'active') return;
+    const targets = Object.values(playersInArena).flat();
+    if (targets.length === 0) return;
+
+    if (guardian.nextAttack === 'aoe') {
+      guardian.nextAttack = 'target';
+      for (const player of this.players) {
+        if (!player.alive) continue;
+        if (Math.hypot(player.x - guardian.x, player.y - guardian.y) > guardian.aoeRadius) continue;
+        this._applyGuardianDamage(player, NEXUS_GUARDIAN_AOE_DAMAGE);
+      }
+      this.events.push({
+        text: '💠 NEXUS GUARDIAN unleashed a pulse wave',
+        faction: 'blue',
+        ttl: 2.5,
+      });
+      this.sparks.push(...Particle.ring(guardian.x, guardian.y, '#9ff5ff', guardian.radius * 0.9, {
+        life: 0.9,
+        growth: 240,
+        lineWidth: 5,
+        gravity: 0,
+      }));
+      return;
+    }
+
+    const target = targets.sort((a, b) =>
+      Math.hypot(a.x - guardian.x, a.y - guardian.y) - Math.hypot(b.x - guardian.x, b.y - guardian.y),
+    )[0];
+    this._applyGuardianDamage(target, NEXUS_GUARDIAN_TARGET_DAMAGE);
+    this.sparks.push(...Particle.burst(target.x, target.y, '#7de6ff', 10, {
+      speedMin: 60,
+      speedMax: 180,
+      lifeMin: 0.45,
+      lifeMax: 0.95,
+      sizeMin: 1.8,
+      sizeMax: 4,
+      gravity: -10,
+    }));
+    this.events.push({
+      text: `🎯 NEXUS GUARDIAN focused ${target.faction.toUpperCase()}`,
+      faction: target.faction,
+      ttl: 2.5,
+    });
+    guardian.nextAttack = 'aoe';
+  }
+
+  _updateNexusGuardian(dt) {
+    const guardian = this.nexusGuardian;
+    if (!guardian) return;
+    this._positionNexusGuardian();
+
+    if (guardian.state !== 'active') {
+      guardian.timer = Math.max(0, guardian.timer - dt);
+      if (guardian.timer <= 0) this._spawnNexusGuardian();
+      return;
+    }
+
+    const playersInArena = { blue: [], green: [], red: [] };
+    for (const player of this.players) {
+      if (!player.alive) continue;
+      if (Math.hypot(player.x - guardian.x, player.y - guardian.y) <= guardian.arenaRadius) {
+        playersInArena[player.faction].push(player);
+      }
+    }
+
+    for (const faction of ['blue', 'green', 'red']) {
+      const attackers = playersInArena[faction];
+      if (attackers.length < NEXUS_GUARDIAN_REQUIRED_ATTACKERS) continue;
+      const damage = attackers.length * NEXUS_GUARDIAN_DPS_PER_PLAYER * dt;
+      guardian.health = Math.max(0, guardian.health - damage);
+      guardian.damageByFaction[faction] += damage;
+      guardian.lastDamager = faction;
+      this.sparks.push(...Particle.aura(
+        guardian.x + (Math.random() - 0.5) * guardian.radius,
+        guardian.y + (Math.random() - 0.5) * guardian.radius,
+        FACTIONS[faction].color,
+        1,
+      ));
+    }
+
+    guardian.attackTimer -= dt;
+    if (guardian.attackTimer <= 0) {
+      guardian.attackTimer = NEXUS_GUARDIAN_ATTACK_INTERVAL;
+      this._nexusGuardianAttack(playersInArena);
+    }
+
+    if (guardian.health <= 0) this._defeatNexusGuardian();
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────

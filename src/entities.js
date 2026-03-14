@@ -33,6 +33,16 @@ export const FACTIONS = {
     glowColor: 'rgba(74,168,255,0.45)',
     role: 'Data Sniper',
     emoji: '🔵',
+    passive: {
+      id: 'data-cache',
+      name: 'Data Cache',
+      deliveryBonusMult: 1.2,
+      minimapVisionRadius: 340,
+      details: [
+        'Owned base delivery score +20%',
+        'Wider minimap scan radius',
+      ],
+    },
   },
   green: {
     id: 'green',
@@ -43,6 +53,17 @@ export const FACTIONS = {
     glowColor: 'rgba(80,255,120,0.45)',
     role: 'Bio Guard',
     emoji: '🟢',
+    passive: {
+      id: 'bio-regen',
+      name: 'Bio Regen',
+      regenDelay: 5,
+      regenPctPerSec: 0.05,
+      allyMaxHealthBonus: 0.15,
+      details: [
+        'Heal 5% max HP/s after 5s out of combat',
+        'Adjacent ally grants +15% max HP',
+      ],
+    },
   },
   red: {
     id: 'red',
@@ -53,6 +74,17 @@ export const FACTIONS = {
     glowColor: 'rgba(255,68,68,0.45)',
     role: 'Core Striker',
     emoji: '🔴',
+    passive: {
+      id: 'overclock',
+      name: 'Overclock',
+      cooldownReductionPerStack: 2,
+      maxStacks: 3,
+      sprintSpeedMult: 1.1,
+      details: [
+        'Kills store -2s next ability cooldown',
+        'Sprint movement speed +10%',
+      ],
+    },
   },
 };
 
@@ -245,6 +277,8 @@ export class Base {
 export class Player {
   constructor(faction, index, x, y) {
     this.faction   = faction;
+    this.factionDef = FACTIONS[faction];
+    this.passive   = this.factionDef.passive;
     this.index     = index;
     this.x         = x;
     this.y         = y;
@@ -268,9 +302,21 @@ export class Player {
     this.jobDef    = jobDef;
     this.speed     = jobDef.speed;
     this.aggro     = jobDef.aggro;
+    this.baseMaxHealth = jobDef.maxHealth;
     this.health    = jobDef.maxHealth;
     this.maxHealth = jobDef.maxHealth;
     this.energy    = 100;
+    this.lastCombatTime = -Infinity;
+    this.passiveState = {
+      deliveryBonusActive: false,
+      minimapVisionRadius: this.passive?.minimapVisionRadius ?? 240,
+      bioRegenActive: false,
+      bioRegenDelayRemaining: 0,
+      nearbyAllyBonus: false,
+      overclockStacks: 0,
+      speedMult: 1,
+      sprintActive: false,
+    };
 
     // Primary skill (slot 0) used by AI and player
     const primary   = jobDef.skills[0];
@@ -305,7 +351,8 @@ export class Player {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) {
         this.alive = true;
-        this.health = this.maxHealth;
+        this.maxHealth = this.baseMaxHealth;
+        this.health = this.baseMaxHealth;
         const base = world.bases[this.faction];
         this.x = base.x + randRange(-30, 30);
         this.y = base.y + randRange(-30, 30);
@@ -339,7 +386,7 @@ export class Player {
           let totalScore = 0;
           for (const jewel of this.carrying) {
             const pts = deliveryTarget.deliverJewel(jewel.value);
-            totalScore += pts;
+            totalScore += world._applyDeliveryPassive(this, deliveryTarget, pts);
             jewel.delivered = true;
           }
           world.scores[this.faction] += totalScore;
@@ -358,13 +405,15 @@ export class Player {
     this.attackTimer -= dt;
 
     const rallying = this._applyRallyCommand(world);
+    const pinning = !rallying && this._applyPinCommand(world);
+    const guardianing = !rallying && !pinning && this._applyGuardianObjective(world);
 
     // ── Hate control: bias toward leading team ──────────────────────────────
     // Fighters prefer to target the leading faction
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    if (!rallying) {
+    if (!rallying && !pinning && !guardianing) {
       switch (this.role) {
         case 'collector': this._aiCollector(world, homeBase); break;
         case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
@@ -375,7 +424,7 @@ export class Player {
     // Pick up jewel when close
     if (this.state === 'carry' && this.target instanceof MemoryCrystal) {
       if (!this.target.delivered && !this.target.carrier && this.carrying.length < MAX_CARRY &&
-          dist(this.x, this.y, this.target.x, this.target.y) < PLAYER_RADIUS + CRYSTAL_RADIUS + 2) {
+          dist(this.x, this.y, this.target.x, this.target.y) < world._getCrystalPickupRadius(this.faction)) {
         this.target.carrier = this;
         this.target.pickupLockOwner = null;
         this.target.pickupLockTimer = 0;
@@ -404,13 +453,15 @@ export class Player {
         const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
         const dmg = baseDmg * dmgMult;
         world._registerDamage(enemy, this.faction);
+        this.markCombat(world.elapsed);
+        enemy.markCombat(world.elapsed);
         enemy.health -= dmg;
         world.sparks.push(...Particle.burst(
           (this.x + enemy.x) / 2,
           (this.y + enemy.y) / 2,
           FACTIONS[this.faction].color, 6));
-        if (enemy.health <= 0) {
-          world._recordElimination(enemy, this.faction, 'eliminated');
+      if (enemy.health <= 0) {
+          world._recordElimination(enemy, this, 'melee KO');
         }
       }
     }
@@ -465,6 +516,74 @@ export class Player {
       y: signal.y + Math.sin(angle) * spread,
     };
     this.state = 'rally';
+    return true;
+  }
+
+  _applyPinCommand(world) {
+    const pin = world._getActivePinForFaction?.(this.faction);
+    if (!pin || this.isPlayerControlled) return false;
+
+    const enemy = world._nearestEnemy(pin.x, pin.y, this.faction);
+    const enemyNearPin = enemy && dist(enemy.x, enemy.y, pin.x, pin.y) <= pin.radius;
+    const angle = (this.index / 5) * Math.PI * 2;
+    const spread = 16 + this.index * 7;
+    const formationPoint = {
+      x: pin.x + Math.cos(angle) * spread,
+      y: pin.y + Math.sin(angle) * spread,
+    };
+
+    if (pin.type === 'danger') {
+      if (enemyNearPin && this.role !== 'collector') {
+        this.target = enemy;
+        this.state = 'attack';
+        return true;
+      }
+      this.target = formationPoint;
+      this.state = 'defend';
+      return true;
+    }
+
+    if (pin.type === 'crystal') {
+      const crystal = world._nearestFreeCrystalInZone?.(pin.x, pin.y, pin.radius);
+      if (crystal && (this.role === 'collector' || this.role === 'defender' || Math.random() < 0.45)) {
+        this.target = crystal;
+        this.state = 'carry';
+        return true;
+      }
+      if (enemyNearPin && this.role === 'fighter') {
+        this.target = enemy;
+        this.state = 'attack';
+        return true;
+      }
+      this.target = formationPoint;
+      this.state = 'rally';
+      return true;
+    }
+
+    if (enemyNearPin && this.role === 'fighter') {
+      this.target = enemy;
+      this.state = 'attack';
+      return true;
+    }
+
+    this.target = formationPoint;
+    this.state = 'rally';
+    return true;
+  }
+
+  _applyGuardianObjective(world) {
+    const guardian = world.nexusGuardian;
+    if (!guardian || guardian.state !== 'active' || this.isPlayerControlled) return false;
+    if (world.guardianBlessings?.[this.faction]) return false;
+    if (this.role === 'collector') return false;
+    const enemy = world._nearestEnemy(guardian.x, guardian.y, this.faction);
+    if (enemy && dist(enemy.x, enemy.y, guardian.x, guardian.y) <= guardian.arenaRadius * 1.1) {
+      this.target = enemy;
+      this.state = 'attack';
+      return true;
+    }
+    this.target = guardian;
+    this.state = 'attack';
     return true;
   }
 
@@ -560,7 +679,9 @@ export class Player {
     const dx = tx - this.x, dy = ty - this.y;
     const d  = Math.sqrt(dx * dx + dy * dy);
     if (d < 2) return;
-    const speedMult = world.factionBuffs?.[this.faction]?.speedMult ?? 1;
+    const speedMult = (world.factionBuffs?.[this.faction]?.speedMult ?? 1) *
+      (this.passiveState?.speedMult ?? 1) *
+      (world._getGuardianBlessing?.(this.faction)?.speedMult ?? 1);
     const effSpeed  = this.speed * speedMult;
     const [nx, ny] = normalise(dx, dy);
     this.vx = lerp(this.vx, nx * effSpeed, 0.12);
@@ -606,7 +727,17 @@ export class Player {
     if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
 
     this.energy  -= this.abilityCost;
-    this.cooldown = this.abilityMax;
+    const cooldownReduction = (this.passive?.id === 'overclock')
+      ? (this.passive.cooldownReductionPerStack * Math.min(
+        this.passive.maxStacks,
+        this.passiveState?.overclockStacks ?? 0,
+      ))
+      : 0;
+    this.cooldown = Math.max(0, this.abilityMax - cooldownReduction);
+    if (this.passive?.id === 'overclock' && this.passiveState) {
+      this.passiveState.overclockStacks = 0;
+    }
+    this.markCombat(world.elapsed ?? 0);
 
     const dx = enemy.x - this.x;
     const dy = enemy.y - this.y;
@@ -617,6 +748,7 @@ export class Player {
     switch (skill.type) {
       case 'railshot': {
         proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage);
+        proj.owner = this;
         break;
       }
       case 'bioshield': {
@@ -636,6 +768,11 @@ export class Player {
       }
     }
     return proj;
+  }
+
+  markCombat(timestamp) {
+    this.lastCombatTime = timestamp;
+    if (this.passiveState) this.passiveState.bioRegenActive = false;
   }
 }
 

@@ -66,11 +66,11 @@ Game (world state, update loop)
 
 ## Factions
 
-| Colour | Name | Role | Base |
-|--------|------|------|------|
-| 🔵 Blue  | **The Archive**      | Data Sniper   | Animated server rack — energy rifle snipers on high ground |
-| 🟢 Green | **Life Forge**       | Bio Guard     | Bionic tree — shield-wall warriors, close-range AoE heal |
-| 🔴 Red   | **Core Protocol**    | Core Striker  | Furnace core — power-fist dash, highest movement speed |
+| Colour | Name | Role | Passive | Base |
+|--------|------|------|---------|------|
+| 🔵 Blue  | **The Archive**      | Data Sniper   | **Data Cache** — owned-base deliveries +20%, wider minimap scan | Animated server rack — energy rifle snipers on high ground |
+| 🟢 Green | **Life Forge**       | Bio Guard     | **Bio Regen** — 5% max HP/s after 5s out of combat, adjacent ally grants +15% max HP | Bionic tree — shield-wall warriors, close-range AoE heal |
+| 🔴 Red   | **Core Protocol**    | Core Striker  | **Overclock** — kills bank -2s next ability cooldown (max 3), sprint speed +10% | Furnace core — power-fist dash, highest movement speed |
 
 ---
 
@@ -219,7 +219,8 @@ python3 -m http.server 8080
 
 Controls (browser preview):
 
-- `W/A/S/D` or Arrow keys: move the local blue agent (`YOU`)
+- Choose your starting faction on the launch screen before deploying.
+- `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
 - `Space`: activate job ability (Warrior: Power Slash) when charged
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
@@ -228,6 +229,8 @@ Controls (browser preview):
 - `C`: cycle spectator camera (`OVERHEAD` → `FOLLOW` → `FREE`)
 - `[` / `]`: switch the followed agent while spectating
 - `W/A/S/D` or Arrow keys in `FREE` spectator camera: pan the camera without affecting the match
+- Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
+- Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time
 
 ---
 
