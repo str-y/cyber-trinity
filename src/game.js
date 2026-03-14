@@ -39,6 +39,9 @@ const ZONE_COLLAPSE_DAMAGE_PCT_PER_SEC = 0.05;
 const ZONE_COLLAPSE_START_RADIUS_RATIO = 0.46;
 const ZONE_COLLAPSE_MIN_RADIUS_RATIO = 0.18;
 const ZONE_COLLAPSE_FX_INTERVAL = 0.22;
+const ZONE_COLLAPSE_MAX_SCORE_GAP = 40;
+const ZONE_COLLAPSE_BASE_EXPONENT = 1.3;
+const ZONE_COLLAPSE_GAP_EXPONENT_REDUCTION = 0.5;
 const QUICK_MODE_SCALE = 0.6;
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
@@ -1495,12 +1498,12 @@ export class Game {
 
     const standings = Object.values(this.scores).sort((a, b) => b - a);
     zone.scoreGap = Math.max(0, (standings[0] ?? 0) - (standings[1] ?? 0));
-    const gapRatio = Math.min(1, zone.scoreGap / 40);
+    const gapRatio = Math.min(1, zone.scoreGap / ZONE_COLLAPSE_MAX_SCORE_GAP);
     zone.speedMultiplier = 0.8 + gapRatio * 0.7;
     const elapsedRatio = Math.max(0, Math.min(1,
       (ZONE_COLLAPSE_START_TIME - Math.max(this.matchTimer, 0)) / ZONE_COLLAPSE_START_TIME,
     ));
-    const progressExponent = 1.3 - gapRatio * 0.5;
+    const progressExponent = ZONE_COLLAPSE_BASE_EXPONENT - gapRatio * ZONE_COLLAPSE_GAP_EXPONENT_REDUCTION;
     zone.progress = Math.pow(elapsedRatio, progressExponent);
     zone.currentRadius = zone.startRadius - (zone.startRadius - zone.minRadius) * zone.progress;
 

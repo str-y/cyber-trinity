@@ -602,7 +602,7 @@ export class HUD {
         : 0;
       detailEl.textContent = outside
         ? `DMG ${Math.round(zone.damagePerSecond * 100)}% HP/s • ${edgeDistance}px TO SAFETY`
-        : `MATCH ${this._formatTimer(world.matchTimer)} • GAP ${zone.scoreGap} • HOLD THE CENTRE`;
+        : `MATCH ${this._formatTimer(world.matchTimer)} • GAP ${zone.scoreGap} • HOLD THE CENTER`;
     }
   }
 

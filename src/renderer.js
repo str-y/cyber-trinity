@@ -23,6 +23,7 @@ function withAlpha(hex, a) {
 
 const RING_PARTICLE_ALPHA = 0.95;
 const CAMERA_ZOOM_THRESHOLD = 1.001;
+const ZONE_COLLAPSE_NOISE_ANGLE_OFFSET = 0.61;
 
 // ── Renderer class ────────────────────────────────────────────────────────────
 
@@ -1106,7 +1107,7 @@ export class Renderer {
     if (!this.lowQuality) {
       ctx.globalAlpha = 0.3 + pulse * 0.18;
       for (let i = 0; i < 28; i++) {
-        const angle = (i * 0.61) + t * 0.9;
+        const angle = (i * ZONE_COLLAPSE_NOISE_ANGLE_OFFSET) + t * 0.9;
         const noiseRadius = radius + 16 + (i % 5) * 18;
         const px = cx + Math.cos(angle) * noiseRadius;
         const py = cy + Math.sin(angle) * noiseRadius;
