@@ -1651,6 +1651,66 @@ export class Game {
     });
   }
 
+  _focusSpectatorCamera(x, y, zoom = this.spectatorCamera.zoom || 1) {
+    const safeZoom = Math.max(REPLAY_MIN_ZOOM, Math.min(REPLAY_MAX_ZOOM, zoom));
+    const halfW = this.width / (2 * safeZoom || 2);
+    const halfH = this.height / (2 * safeZoom || 2);
+    this.spectatorCamera.zoom = safeZoom;
+    this.spectatorCamera.x = Math.max(halfW, Math.min(this.width - halfW, x));
+    this.spectatorCamera.y = Math.max(halfH, Math.min(this.height - halfH, y));
+  }
+
+  _cycleSpectatorTarget(direction = 1) {
+    const alivePlayers = this.players.filter(player => player.alive);
+    if (!alivePlayers.length) {
+      this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+      return;
+    }
+    const currentIndex = alivePlayers.indexOf(this.spectatorTarget);
+    const nextIndex = direction === 0 || currentIndex < 0
+      ? 0
+      : (currentIndex + direction + alivePlayers.length) % alivePlayers.length;
+    this.spectatorTarget = alivePlayers[nextIndex];
+    if (this.spectatorCameraMode === 'follow' && this.spectatorTarget) {
+      this._focusSpectatorCamera(this.spectatorTarget.x, this.spectatorTarget.y, 1.35);
+    }
+  }
+
+  _cycleSpectatorCameraMode() {
+    if (!this.spectatorMode) return;
+    const modes = ['overhead', 'follow', 'free'];
+    const index = modes.indexOf(this.spectatorCameraMode);
+    this.spectatorCameraMode = modes[(index + 1 + modes.length) % modes.length];
+    this.events.push({
+      text: `👁️ Camera ${this.spectatorCameraMode.toUpperCase()}`,
+      faction: 'blue',
+      ttl: 2,
+    });
+    this._updateSpectatorState(0);
+  }
+
+  _updateSpectatorState(dt) {
+    if (!this.spectatorMode) return;
+    if (this.spectatorCameraMode === 'overhead') {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+      return;
+    }
+    if (this.spectatorCameraMode === 'follow') {
+      const target = this.spectatorTarget?.alive ? this.spectatorTarget : this.localPlayer;
+      if (target) this._focusSpectatorCamera(target.x, target.y, 1.35);
+      return;
+    }
+    const panSpeed = REPLAY_PAN_SPEED / (this.spectatorCamera.zoom || 1);
+    const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
+    const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
+    this._focusSpectatorCamera(
+      this.spectatorCamera.x + dx * panSpeed * dt,
+      this.spectatorCamera.y + dy * panSpeed * dt,
+      this.spectatorCamera.zoom +
+        ((this.input.zoomIn ? 1 : 0) - (this.input.zoomOut ? 1 : 0)) * dt * REPLAY_ZOOM_RATE,
+    );
+  }
+
   resetReplayCamera() {
     this.camera.x = this.width / 2;
     this.camera.y = this.height / 2;
