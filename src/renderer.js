@@ -29,6 +29,7 @@ export class Renderer {
     this.canvas = canvas;
     this.ctx    = canvas.getContext('2d');
     this.time   = 0;
+    this.minimapBounds = null;
   }
 
   resize(w, h) {
@@ -113,6 +114,24 @@ export class Renderer {
 
     // ── Minimap ────────────────────────────────────────────────────────────
     this._drawMinimap(world, W, H);
+  }
+
+  screenToMinimapWorld(clientX, clientY, world) {
+    if (!this.minimapBounds || !world?.width || !world?.height) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    const bounds = this.minimapBounds;
+    if (x < bounds.x || x > bounds.x + bounds.width ||
+        y < bounds.y || y > bounds.y + bounds.height) {
+      return null;
+    }
+    return {
+      x: ((x - bounds.x) / bounds.width) * world.width,
+      y: ((y - bounds.y) / bounds.height) * world.height,
+    };
   }
 
   // ── Grid ──────────────────────────────────────────────────────────────────
@@ -629,6 +648,30 @@ export class Renderer {
       ctx.restore();
     }
 
+    if (world.minimapPins) {
+      for (const pin of world.minimapPins) {
+        const style = this._pinStyle(pin.type);
+        const pulse = 0.45 + 0.3 * Math.sin(this.time * 7 + pin.x * 0.01);
+        ctx.save();
+        ctx.strokeStyle = withAlpha(style.color, 0.45 + pulse * 0.35);
+        ctx.fillStyle = withAlpha(style.color, 0.10 + pulse * 0.10);
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 10]);
+        ctx.beginPath();
+        ctx.arc(pin.x, pin.y, pin.radius * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = withAlpha(style.color, 0.95);
+        ctx.font = 'bold 11px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.glyph, pin.x, pin.y + 4);
+        ctx.font = 'bold 9px "Courier New", monospace';
+        ctx.fillText(style.label, pin.x, pin.y - pin.radius * 0.38 - 10);
+        ctx.restore();
+      }
+    }
+
     if (!local?.alive || !target?.alive) return;
 
     const dx = target.x - local.x;
@@ -1029,6 +1072,15 @@ export class Renderer {
     const wH     = world.height;
     const local  = world.localPlayer;
     const visionRadius = local?.passiveState?.minimapVisionRadius ?? 240;
+    const filters = world.hud?.getMinimapFilters?.() ?? {
+      agents: { blue: true, green: true, red: true },
+      crystals: true,
+      chaosZones: true,
+    };
+    const agentFilters = filters.agents ?? { blue: true, green: true, red: true };
+    const localBaseAlert = local?.faction ? world.baseAttackAlerts?.[local.faction] : null;
+    const alertPulse = 0.35 + 0.3 * Math.sin(this.time * 10);
+    this.minimapBounds = { x: x0, y: y0, width: mapW, height: mapH };
 
     // Map world coordinates → minimap pixel coordinates
     const mx = (wx) => x0 + (wx / wW) * mapW;
@@ -1042,8 +1094,12 @@ export class Renderer {
     ctx.save();
 
     // ── Background panel ─────────────────────────────────────────────────
-    ctx.fillStyle   = 'rgba(2,8,20,0.72)';
-    ctx.strokeStyle = 'rgba(80,140,255,0.30)';
+    ctx.fillStyle   = localBaseAlert?.active
+      ? `rgba(40,6,12,${0.72 + alertPulse * 0.08})`
+      : 'rgba(2,8,20,0.72)';
+    ctx.strokeStyle = localBaseAlert?.active
+      ? `rgba(255,68,68,${0.45 + alertPulse * 0.45})`
+      : 'rgba(80,140,255,0.30)';
     ctx.lineWidth   = 1;
     ctx.fillRect(x0, y0, mapW, mapH);
     ctx.strokeRect(x0, y0, mapW, mapH);
@@ -1052,6 +1108,28 @@ export class Renderer {
     ctx.beginPath();
     ctx.rect(x0, y0, mapW, mapH);
     ctx.clip();
+
+    if (filters.chaosZones && world.chaosEvent) {
+      const event = world.chaosEvent;
+      const pulse = 0.15 + 0.18 * Math.sin(this.time * 8);
+      ctx.save();
+      if (event.type === 'emp_storm') {
+        ctx.strokeStyle = withAlpha(event.color, 0.5 + pulse);
+        ctx.fillStyle = withAlpha(event.color, pulse * 0.45);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mx(event.x), my(event.y), (event.radius / wW) * mapW, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = withAlpha(event.color, 0.45 + pulse);
+        ctx.fillStyle = withAlpha(event.color, 0.08 + pulse * 0.18);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0 + 3, y0 + 3, mapW - 6, mapH - 6);
+        ctx.fillRect(x0 + 3, y0 + 3, mapW - 6, mapH - 6);
+      }
+      ctx.restore();
+    }
 
     // ── Home bases (large dots) ──────────────────────────────────────────
     for (const base of Object.values(world.bases)) {
@@ -1081,24 +1159,27 @@ export class Renderer {
     }
 
     // ── Crystals (white, blinking) ────────────────────────────────────────
-    const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
-    for (const crystal of world.crystals) {
-      if (crystal.delivered) continue;
-      if (!isVisible(crystal.x, crystal.y)) continue;
-      const tColor = crystal.tierColor ?? '#a0d4ff';
-      const { r, g, b } = hexToRgb(tColor);
-      ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
-      ctx.beginPath();
-      ctx.arc(mx(crystal.x), my(crystal.y), 1.8, 0, Math.PI * 2);
-      ctx.fill();
+    if (filters.crystals) {
+      const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
+      for (const crystal of world.crystals) {
+        if (crystal.delivered) continue;
+        if (!isVisible(crystal.x, crystal.y)) continue;
+        const tColor = crystal.tierColor ?? '#a0d4ff';
+        const { r, g, b } = hexToRgb(tColor);
+        ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
+        ctx.beginPath();
+        ctx.arc(mx(crystal.x), my(crystal.y), 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // ── Agents (small faction-coloured dots) ──────────────────────────────
     for (const player of world.players) {
       if (!player.alive) continue;
       if (!isVisible(player.x, player.y, player.faction)) continue;
+       if (!agentFilters[player.faction]) continue;
       const f = FACTIONS[player.faction];
       const { r, g, b } = hexToRgb(f.color);
       ctx.fillStyle  = `rgba(${r},${g},${b},0.95)`;
@@ -1107,6 +1188,41 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(mx(player.x), my(player.y), 2.5, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    if (world.recentDeaths) {
+      for (const marker of world.recentDeaths) {
+        if (!isVisible(marker.x, marker.y, marker.faction)) continue;
+        const alpha = Math.min(1, marker.timer / 1.5);
+        ctx.strokeStyle = `rgba(255,90,90,${alpha})`;
+        ctx.lineWidth = 1.2;
+        const px = mx(marker.x);
+        const py = my(marker.y);
+        ctx.beginPath();
+        ctx.moveTo(px - 3, py - 3);
+        ctx.lineTo(px + 3, py + 3);
+        ctx.moveTo(px + 3, py - 3);
+        ctx.lineTo(px - 3, py + 3);
+        ctx.stroke();
+      }
+    }
+
+    if (world.minimapPins) {
+      for (const pin of world.minimapPins) {
+        const style = this._pinStyle(pin.type);
+        const pulse = 0.45 + 0.35 * Math.sin(this.time * 8 + pin.y * 0.01);
+        const px = mx(pin.x);
+        const py = my(pin.y);
+        ctx.strokeStyle = withAlpha(style.color, 0.45 + pulse * 0.35);
+        ctx.fillStyle = withAlpha(style.color, 0.9);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = 'bold 7px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.glyph, px, py + 2.5);
+      }
     }
 
     ctx.shadowBlur = 0;
@@ -1118,7 +1234,7 @@ export class Renderer {
     ctx.font         = 'bold 7px "Courier New", monospace';
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('MAP', x0 + 4, y0 + 3);
+    ctx.fillText(localBaseAlert?.active ? 'MAP ALERT' : 'MAP', x0 + 4, y0 + 3);
     if (local?.alive) {
       const revealRadius = (visionRadius / wW) * mapW;
       ctx.strokeStyle = withAlpha(FACTIONS[local.faction].color, 0.5);
@@ -1128,5 +1244,13 @@ export class Renderer {
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  _pinStyle(type) {
+    return {
+      gather: { color: '#4aa8ff', glyph: '⌁', label: 'GROUP' },
+      danger: { color: '#ff4444', glyph: '!', label: 'DANGER' },
+      crystal: { color: '#ffd700', glyph: '◆', label: 'CRYSTAL' },
+    }[type] ?? { color: '#4aa8ff', glyph: '⌁', label: 'GROUP' };
   }
 }

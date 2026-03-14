@@ -459,6 +459,108 @@ html, body {
   gap: 6px;
 }
 
+#minimap-controls {
+  position: absolute;
+  top: 108px;
+  left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 210px;
+  background: rgba(0, 10, 30, 0.72);
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 9px 12px;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+#minimap-controls.alerting {
+  border-color: rgba(255, 68, 68, 0.78);
+  box-shadow: 0 0 18px rgba(255, 68, 68, 0.22);
+  background: rgba(32, 6, 10, 0.84);
+}
+
+.minimap-section-label {
+  font-size: 8px;
+  letter-spacing: 3px;
+  opacity: 0.48;
+}
+
+.minimap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.minimap-toggle input {
+  accent-color: #4aa8ff;
+}
+
+.pin-type-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pin-type-button {
+  border: 1px solid rgba(100, 180, 255, 0.25);
+  border-radius: 4px;
+  padding: 5px 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #cfe7ff;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pin-type-button.active {
+  border-color: rgba(100, 180, 255, 0.65);
+  background: rgba(74, 168, 255, 0.14);
+  box-shadow: 0 0 10px rgba(74, 168, 255, 0.15);
+}
+
+.minimap-hint,
+.minimap-alert-state {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.minimap-hint {
+  opacity: 0.55;
+}
+
+.minimap-alert-state {
+  color: #a0d4ff;
+}
+
+.minimap-alert-state[data-tone="alert"] {
+  color: #ff8888;
+  text-shadow: 0 0 12px rgba(255, 68, 68, 0.45);
+}
+
+.minimap-alert-state[data-tone="chaos"] {
+  color: #ffd966;
+}
+
+.minimap-alert-state[data-tone="danger"] {
+  color: #ff8888;
+}
+
+.minimap-alert-state[data-tone="crystal"] {
+  color: #ffe27a;
+}
+
+.minimap-alert-state[data-tone="gather"] {
+  color: #8de4ff;
+}
+
 .legend-row {
   display: flex;
   align-items: center;

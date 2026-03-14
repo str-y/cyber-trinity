@@ -225,6 +225,8 @@ Controls (browser preview):
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
 - `Q`: issue a temporary rally signal so nearby blue AI reprioritise around your position
+- Click the minimap: place a team pin using the selected pin type (`集合` / `危険` / `クリスタル`)
+- Use the minimap tactics panel to toggle faction agents, crystal spawns, and chaos-zone overlays in real time
 
 ---
 

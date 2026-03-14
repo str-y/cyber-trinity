@@ -15,6 +15,12 @@ export class HUD {
     this._scoreEls   = {};
     this._feedItems  = [];
     this._scoreboardEl = null;
+    this._minimapFilters = {
+      agents: { blue: true, green: true, red: true },
+      crystals: true,
+      chaosZones: true,
+    };
+    this._selectedPinType = 'gather';
     this._init();
   }
 
@@ -68,6 +74,64 @@ export class HUD {
       `;
       legend.appendChild(row);
     });
+
+    const minimapControls = document.getElementById('minimap-controls');
+    if (minimapControls) {
+      minimapControls.innerHTML = `
+        <div class="panel-title blue">MINIMAP TACTICS</div>
+        <div class="minimap-section-label">FILTERS</div>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="agents" data-filter-key="blue" checked />
+          <span class="blue">BLUE AGENTS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="agents" data-filter-key="green" checked />
+          <span class="green">GREEN AGENTS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="agents" data-filter-key="red" checked />
+          <span class="red">RED AGENTS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="root" data-filter-key="crystals" checked />
+          <span>CRYSTAL SPAWNS</span>
+        </label>
+        <label class="minimap-toggle">
+          <input type="checkbox" data-filter-group="root" data-filter-key="chaosZones" checked />
+          <span>CHAOS ZONES</span>
+        </label>
+        <div class="minimap-section-label">PIN TYPE</div>
+        <div class="pin-type-row">
+          <button type="button" class="pin-type-button active" data-pin-type="gather">集合</button>
+          <button type="button" class="pin-type-button" data-pin-type="danger">危険</button>
+          <button type="button" class="pin-type-button" data-pin-type="crystal">クリスタル</button>
+        </div>
+        <div class="minimap-hint">CLICK THE MINIMAP TO ISSUE A TEAM PIN</div>
+        <div class="minimap-alert-state" id="minimap-alert-state">STATUS — STANDBY</div>
+      `;
+      minimapControls.addEventListener('change', (event) => {
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement)) return;
+        const group = input.dataset.filterGroup;
+        const key = input.dataset.filterKey;
+        if (!group || !key) return;
+        if (group === 'agents') {
+          this._minimapFilters.agents[key] = input.checked;
+        } else {
+          this._minimapFilters[key] = input.checked;
+        }
+      });
+      minimapControls.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-pin-type]');
+        if (!(button instanceof HTMLButtonElement)) return;
+        this._selectedPinType = button.dataset.pinType ?? 'gather';
+        for (const node of minimapControls.querySelectorAll('[data-pin-type]')) {
+          node.classList.toggle('active', node === button);
+        }
+      });
+      this._minimapControlsEl = minimapControls;
+      this._minimapAlertEl = minimapControls.querySelector('#minimap-alert-state');
+    }
 
     // ── Left status (local blue agent) ────────────────────────────────────
 
@@ -243,6 +307,7 @@ export class HUD {
     this._updateFeed(world);
     this._updateChaosEvent(world);
     this._updateScoreboard(world);
+    this._updateMinimapStatus(world);
   }
 
   _setBar(id, value, max, numText) {
@@ -433,5 +498,38 @@ export class HUD {
       set(`sb-${faction}-crystals`, stats.crystals);
       set(`sb-${faction}-score`, score);
     }
+  }
+
+  _updateMinimapStatus(world) {
+    if (!this._minimapAlertEl) return;
+    const localFaction = world.localPlayer?.faction ?? 'blue';
+    const baseAlert = world.baseAttackAlerts?.[localFaction];
+    const pin = world._getActivePinForFaction?.(localFaction);
+    let text = 'STATUS — STANDBY';
+    let tone = '';
+    if (baseAlert?.active) {
+      text = 'ALERT — BASE UNDER ATTACK';
+      tone = 'alert';
+    } else if (world.chaosEvent) {
+      text = `${world.chaosEvent.emoji} ${world.chaosEvent.name} ACTIVE`;
+      tone = 'chaos';
+    } else if (pin) {
+      const labels = { gather: '集合', danger: '危険', crystal: 'クリスタル' };
+      text = `PIN — ${labels[pin.type] ?? pin.type.toUpperCase()}`;
+      tone = pin.type;
+    }
+    this._minimapAlertEl.textContent = text;
+    this._minimapAlertEl.dataset.tone = tone;
+    if (this._minimapControlsEl) {
+      this._minimapControlsEl.classList.toggle('alerting', !!baseAlert?.active);
+    }
+  }
+
+  getMinimapFilters() {
+    return this._minimapFilters;
+  }
+
+  getSelectedPinType() {
+    return this._selectedPinType;
   }
 }
