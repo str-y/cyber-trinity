@@ -13,7 +13,7 @@
 
 export const DEFAULT_CONFIG = {
   matchDuration:      300,      // seconds  (180 / 300 / 600)
-  winScore:           150,      // standard mode target; quick mode forces 80
+  winScore:           150,      // standard mode target; 2v2v2 mode forces 80
   chaosEnabled:       true,
   chaosInterval:      30,       // seconds  (30 / 60 / 90)
   gameMode:           'standard',  // 'standard' (5v5v5) | 'quick' (2v2v2)
@@ -359,7 +359,7 @@ export function initLobby(els, onLaunch) {
       for (const btn of group.querySelectorAll('.opt-btn')) {
         const locked = btn.dataset.value !== String(preset[setting]);
         btn.disabled = locked;
-        btn.title = locked ? `${config.gameMode.toUpperCase()} mode preset` : '';
+        btn.title = locked ? `Locked to ${config.gameMode.toUpperCase()} mode preset` : '';
       }
     }
   }

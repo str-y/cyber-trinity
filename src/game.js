@@ -23,9 +23,11 @@ const KILL_SCORE = 5;
 const ASSIST_SCORE = 2;
 const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
+const QUICK_MODE_SCALE = 0.6;
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
 const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
+const MAX_JEWEL_INSET_RATIO = 0.28;
 const BASE_ALERT_RANGE = BASE_RADIUS + 84;
 const BASE_ALERT_COOLDOWN = 5;
 const DEATH_MARKER_DURATION = 5;
@@ -85,12 +87,12 @@ const MODE_RULES = {
     trilockRingRatio: 0.11,
     spawnOrbit: 28,
     spawnOrbitVariance: 12,
-    crystalCountMult: 0.6,
-    bonusJewelInterval: 20 / 0.6,
-    crystalRainInterval: 1.5 / 0.6,
+    crystalCountMult: QUICK_MODE_SCALE,
+    bonusJewelInterval: 20 / QUICK_MODE_SCALE,
+    crystalRainInterval: 1.5 / QUICK_MODE_SCALE,
     featureTriggerScale: 80 / 150,
-    guardianInitialSpawn: NEXUS_GUARDIAN_INITIAL_SPAWN * 0.6,
-    guardianRespawnTime: NEXUS_GUARDIAN_RESPAWN_TIME * 0.6,
+    guardianInitialSpawn: NEXUS_GUARDIAN_INITIAL_SPAWN * QUICK_MODE_SCALE,
+    guardianRespawnTime: NEXUS_GUARDIAN_RESPAWN_TIME * QUICK_MODE_SCALE,
     normalInset: 110,
     rareSpreadRatio: 0.18,
     legendarySpreadRatio: 0.10,
@@ -519,6 +521,7 @@ export class Game {
     }
 
     // Position: higher-tier jewels spawn closer to centre
+    const inset = Math.min(this.modeRules.normalInset, Math.min(W, H) * MAX_JEWEL_INSET_RATIO);
     let x, y;
     if (tier.tier === 'legendary') {
       // Centre zone (inner 30%)
@@ -531,12 +534,10 @@ export class Game {
       x = cx + (Math.random() - 0.5) * spread * 2;
       y = cy + (Math.random() - 0.5) * spread * 2;
     } else {
-      // Standard uses the full field; quick mode stays in the central combat area.
-      const inset = Math.min(this.modeRules.normalInset, Math.min(W, H) * 0.28);
+      // Standard uses the full field; Quick Match stays in the central combat area.
       x = inset + Math.random() * (W - inset * 2);
       y = inset + Math.random() * (H - inset * 2);
     }
-    const inset = Math.min(this.modeRules.normalInset, Math.min(W, H) * 0.28);
     x = Math.max(inset, Math.min(W - inset, x));
     y = Math.max(inset, Math.min(H - inset, y));
     return new MemoryCrystal(x, y, tier);
