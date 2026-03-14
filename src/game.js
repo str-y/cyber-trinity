@@ -153,6 +153,20 @@ function getModeRules(mode = 'standard') {
   return MODE_RULES[mode] ?? MODE_RULES.standard;
 }
 
+function createFactionStats() {
+  return {
+    kills: 0,
+    deaths: 0,
+    assists: 0,
+    crystalsCollected: 0,
+    crystals: 0,
+    captures: 0,
+    chaosActivity: 0,
+    abilitiesUsed: 0,
+    deliveryScore: 0,
+  };
+}
+
 const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout'];
 const JOB_SWITCH_SHORTCUTS = {
   Digit1: 'warrior',
@@ -349,9 +363,9 @@ export class Game {
     this.rain        = [];
     this.scores      = { blue: 0, green: 0, red: 0 };
     this.stats       = {
-      blue: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
-      green: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
-      red: { kills: 0, deaths: 0, assists: 0, crystals: 0 },
+      blue: createFactionStats(),
+      green: createFactionStats(),
+      red: createFactionStats(),
     };
     this.events      = [];
     this.projectiles = [];
@@ -427,6 +441,7 @@ export class Game {
 
     // ── Jewel respawn timer ─────────────────────────────────────────────────
     this._jewelRespawnAccum = 0;
+    this.sessionMatches = 0;
     this._configureModeState();
   }
 
@@ -1120,6 +1135,11 @@ export class Game {
         player.health = Math.min(player.maxHealth, player.health + healBuff * dt);
       }
 
+      if (player.alive && this.chaosEvent) {
+        player.recordStat('chaosActivity', dt);
+        this.stats[player.faction].chaosActivity += dt;
+      }
+
       const buff = this.factionBuffs[player.faction];
       const guardianBlessing = this.guardianBlessings[player.faction];
       const passiveAura = player.passiveState?.deliveryBonusActive ||
@@ -1507,12 +1527,13 @@ export class Game {
     // Deliver jewels to any owned base (home or captured TriLock)
     if (player.carrying.length > 0) {
       const deliveryBase = this._nearestOwnedBase(player.x, player.y, player.faction);
-      if (deliveryBase && Math.hypot(player.x - deliveryBase.x, player.y - deliveryBase.y) < BASE_RADIUS - 5) {
-        let totalScore = 0;
-        for (const jewel of player.carrying) {
-          const pts = deliveryBase.deliverJewel(jewel.value);
-          totalScore += this._applyDeliveryPassive(player, deliveryBase, pts);
-          jewel.delivered = true;
+        if (deliveryBase && Math.hypot(player.x - deliveryBase.x, player.y - deliveryBase.y) < BASE_RADIUS - 5) {
+          let totalScore = 0;
+          const deliveredCount = player.carrying.length;
+          for (const jewel of player.carrying) {
+            const pts = deliveryBase.deliverJewel(jewel.value);
+            totalScore += this._applyDeliveryPassive(player, deliveryBase, pts);
+            jewel.delivered = true;
           this.sparks.push(...Particle.burst(deliveryBase.x, deliveryBase.y, jewel.tierColor, 5, {
             speedMin: 70,
             speedMax: 220,
@@ -1525,7 +1546,7 @@ export class Game {
           }));
         }
         this.scores[player.faction] += totalScore;
-        this.stats[player.faction].crystals += player.carrying.length;
+        this._recordCrystalDelivery(player, deliveredCount, totalScore);
         if (this._isTutorialMode()) this._tutorialMetrics.deliveryDone = true;
         this.sparks.push(...Particle.ring(deliveryBase.x, deliveryBase.y, FACTIONS[player.faction].color, BASE_RADIUS * 0.55, {
           life: 0.85,
@@ -1551,6 +1572,7 @@ export class Game {
           nearest.pickupLockOwner = null;
           nearest.pickupLockTimer = 0;
           player.carrying.push(nearest);
+          this._recordCrystalPickup(player);
           this.audio.playCrystalPickup(nearest.tier);
         }
       }
@@ -1581,7 +1603,7 @@ export class Game {
         if (this._isAlly(proj.faction, p.faction)) continue;   // skip allied faction
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
-          this._registerDamage(p, proj.faction);
+          this._registerDamage(p, proj.owner ?? proj.faction);
           proj.owner?.markCombat(this.elapsed);
           p.markCombat(this.elapsed);
           p.health -= proj.damage;
@@ -1720,6 +1742,26 @@ export class Game {
     });
   }
 
+  _recordCrystalPickup(player) {
+    if (!player) return;
+    player.recordStat('crystalsCollected');
+    this.stats[player.faction].crystalsCollected++;
+  }
+
+  _recordCrystalDelivery(player, deliveredCount, totalScore) {
+    if (!player || deliveredCount <= 0) return;
+    player.recordStat('crystalsDelivered', deliveredCount);
+    player.recordStat('deliveryScore', totalScore);
+    this.stats[player.faction].crystals += deliveredCount;
+    this.stats[player.faction].deliveryScore += totalScore;
+  }
+
+  _recordAbilityUse(player) {
+    if (!player) return;
+    player.recordStat('abilitiesUsed');
+    this.stats[player.faction].abilitiesUsed++;
+  }
+
   _clearChaosEvent() {
     this.chaosEvent = null;
     this._clearHighValueBase();
@@ -1803,8 +1845,10 @@ export class Game {
         (killerPlayer.passiveState.overclockStacks ?? 0) + 1,
       );
     }
+    victim.recordStat('deaths');
     this.stats[victim.faction].deaths++;
     if (killerSide && this.stats[killerSide]) {
+      killerPlayer?.recordStat('kills');
       this.stats[killerSide].kills++;
       this.scores[killerSide] += KILL_SCORE;
       this.events.push({
@@ -1822,9 +1866,20 @@ export class Game {
 
     const ledger = this.damageLedger.get(victim);
     if (ledger && killerSide && this.stats[killerSide]) {
-      for (const [assistFaction, hitTime] of ledger.entries()) {
+      const assistMap = new Map();
+      for (const [attacker, hitTime] of ledger.entries()) {
+        const assistPlayer = typeof attacker === 'string' ? null : attacker;
+        const assistFaction = assistPlayer?.faction ?? attacker;
+        if (!assistFaction) continue;
         if (assistFaction === killerSide) continue;
         if ((this.elapsed - hitTime) > ASSIST_WINDOW) continue;
+        const prev = assistMap.get(assistFaction);
+        if (!prev || hitTime > prev.hitTime) {
+          assistMap.set(assistFaction, { player: assistPlayer, hitTime });
+        }
+      }
+      for (const [assistFaction, assist] of assistMap.entries()) {
+        assist.player?.recordStat('assists');
         this.stats[assistFaction].assists++;
         this.scores[assistFaction] += ASSIST_SCORE;
         this.events.push({
@@ -1849,12 +1904,14 @@ export class Game {
           this.matchEnded = true;
           this.winnerFaction = faction;
           this.victoryTimer = 5;
+          this.sessionMatches++;
           this.audio.playMatchEnd(this.winnerFaction);
           this.events.push({
             text: `🏆 ${this.winnerFaction.toUpperCase()} reached ${this.config.winScore} pts — VICTORY!`,
             faction: this.winnerFaction,
             ttl: 5,
           });
+          this.replay.finalizeRecording();
           return;
         }
       }
@@ -1868,6 +1925,7 @@ export class Game {
         .sort((a, b) => b.score - a.score);
       this.winnerFaction = ranking[0].faction;
       this.victoryTimer = 5;
+      this.sessionMatches++;
       this.audio.playMatchEnd(this.winnerFaction);
       this.events.push({
         text: `⏰ TIME UP! ${this.winnerFaction.toUpperCase()} wins the match`,
@@ -1883,7 +1941,7 @@ export class Game {
     // Reset scores and stats
     for (const faction of ['blue', 'green', 'red']) {
       this.scores[faction] = 0;
-      this.stats[faction] = { kills: 0, deaths: 0, assists: 0, crystals: 0 };
+      this.stats[faction] = createFactionStats();
     }
 
     // Reset match state
@@ -1943,6 +2001,7 @@ export class Game {
       player.cooldown = Math.random() * player.abilityMax;
       player.trailPoints = [];
       player.lastCombatTime = -Infinity;
+      player.resetMatchStats();
       player.passiveState.deliveryBonusActive = false;
       player.passiveState.bioRegenActive = false;
       player.passiveState.bioRegenDelayRemaining = 0;
@@ -2513,6 +2572,7 @@ export class Game {
       players: this.players.map(player => ({
         faction: player.faction,
         index: player.index,
+        job: player.job,
         x: round(player.x),
         y: round(player.y),
         vx: round(player.vx),
@@ -2533,6 +2593,7 @@ export class Game {
           y: round(point.y),
           a: round(point.a ?? 1, 3),
         })),
+        stats: JSON.parse(JSON.stringify(player.stats)),
         carrying: [],
       })),
       crystals: this.crystals.map(crystal => ({
@@ -2619,6 +2680,7 @@ export class Game {
       player.vy = snapshot.vy;
       player.alive = snapshot.alive;
       player.respawnTimer = snapshot.respawnTimer;
+      player.job = snapshot.job ?? player.job;
       player.health = snapshot.health;
       player.maxHealth = snapshot.maxHealth;
       player.energy = snapshot.energy;
@@ -2629,6 +2691,7 @@ export class Game {
       player.role = snapshot.role;
       player.target = snapshot.target ? { ...snapshot.target } : null;
       player.trailPoints = (snapshot.trailPoints ?? []).map(point => ({ ...point }));
+      player.stats = { ...player.stats, ...(snapshot.stats ?? {}) };
     });
 
     this.crystals = (frame.crystals ?? []).map(snapshot => ({
@@ -2684,6 +2747,48 @@ export class Game {
   restartLiveMatch() {
     this.exitReplayPlayback();
     this._restart();
+  }
+
+  _focusSpectatorCamera(x, y, zoom = this.spectatorCamera?.zoom ?? 1) {
+    this.spectatorCamera = {
+      x: Math.max(0, Math.min(this.width, x)),
+      y: Math.max(0, Math.min(this.height, y)),
+      zoom,
+    };
+  }
+
+  _updateSpectatorState() {
+    if (!this.spectatorMode) {
+      this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+      return;
+    }
+    const observed = this.getObservedPlayer();
+    if (!observed) return;
+    if (this.spectatorCameraMode === 'follow') {
+      this._focusSpectatorCamera(observed.x, observed.y, 1.45);
+    } else {
+      this._focusSpectatorCamera(this.width / 2, this.height / 2, 1);
+    }
+  }
+
+  _cycleSpectatorTarget(direction = 1) {
+    const roster = this.players.filter(player => player.alive);
+    if (!roster.length) {
+      this.spectatorTarget = this.localPlayer ?? this.players[0] ?? null;
+      this._updateSpectatorState();
+      return;
+    }
+    const current = this.spectatorTarget ? roster.indexOf(this.spectatorTarget) : -1;
+    const nextIndex = current < 0
+      ? 0
+      : (current + direction + roster.length) % roster.length;
+    this.spectatorTarget = roster[nextIndex];
+    this._updateSpectatorState();
+  }
+
+  _cycleSpectatorCameraMode() {
+    this.spectatorCameraMode = this.spectatorCameraMode === 'follow' ? 'overhead' : 'follow';
+    this._updateSpectatorState();
   }
 
   _toggleSpectatorMode() {
@@ -2971,6 +3076,12 @@ export class Game {
 
       // Emit event on faction change
       if (tl.faction && tl.faction !== prevFaction) {
+        this.stats[tl.faction].captures++;
+        for (const p of this.players) {
+          if (!p.alive || p.faction !== tl.faction) continue;
+          const d = Math.sqrt((p.x - tl.x) ** 2 + (p.y - tl.y) ** 2);
+          if (d < CAPTURE_RANGE) p.recordStat('baseCaptures');
+        }
         this.events.push({
           text: `🏰 ${tl.faction.toUpperCase()} captured a TRILOCK!`,
           faction: tl.faction,
