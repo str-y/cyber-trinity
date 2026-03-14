@@ -568,13 +568,14 @@ export class Game {
         player.health = Math.min(player.maxHealth, player.health + healBuff * dt);
       }
 
-      const buff = this.factionBuffs[player.faction] ?? this.guardianBlessings[player.faction];
+      const buff = this.factionBuffs[player.faction];
+      const guardianBlessing = this.guardianBlessings[player.faction];
       const passiveAura = player.passiveState?.deliveryBonusActive ||
         player.passiveState?.bioRegenActive ||
         player.passiveState?.nearbyAllyBonus ||
         player.passiveState?.overclockStacks > 0 ||
         player.passiveState?.sprintActive;
-      if (player.alive && (buff || passiveAura)) {
+      if (player.alive && (buff || guardianBlessing || passiveAura)) {
         player.auraTimer -= dt;
         if (player.auraTimer <= 0) {
           this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
@@ -1531,7 +1532,8 @@ export class Game {
   }
 
   _dropGuardianCrystals(guardian) {
-    const legendary = JEWEL_TIERS.find(tier => tier.tier === 'legendary') ?? JEWEL_TIERS[JEWEL_TIERS.length - 1];
+    const legendary = JEWEL_TIERS.find(tier => tier.tier === 'legendary') ??
+      JEWEL_TIERS.reduce((best, tier) => (tier.value > best.value ? tier : best), JEWEL_TIERS[0]);
     for (let i = 0; i < 3; i++) {
       const angle = (i / 3) * Math.PI * 2 - Math.PI / 2;
       const radius = guardian.radius + 22;
@@ -1571,7 +1573,7 @@ export class Game {
     });
     if (winnerFaction) {
       this.events.push({
-        text: `✨ ${winnerFaction.toUpperCase()} gained GUARDIAN'S BLESSING (60s)`,
+        text: `✨ ${winnerFaction.toUpperCase()} gained GUARDIAN'S BLESSING (${GUARDIAN_BLESSING_DURATION}s)`,
         faction: winnerFaction,
         ttl: 4,
       });
@@ -1587,6 +1589,12 @@ export class Game {
     }));
   }
 
+  _applyGuardianDamage(player, damage) {
+    player.markCombat(this.elapsed);
+    player.health -= damage;
+    if (player.health <= 0) this._recordElimination(player, null);
+  }
+
   _nexusGuardianAttack(playersInArena) {
     const guardian = this.nexusGuardian;
     if (!guardian || guardian.state !== 'active') return;
@@ -1594,12 +1602,11 @@ export class Game {
     if (targets.length === 0) return;
 
     if (guardian.nextAttack === 'aoe') {
+      guardian.nextAttack = 'target';
       for (const player of this.players) {
         if (!player.alive) continue;
         if (Math.hypot(player.x - guardian.x, player.y - guardian.y) > guardian.aoeRadius) continue;
-        player.markCombat(this.elapsed);
-        player.health -= NEXUS_GUARDIAN_AOE_DAMAGE;
-        if (player.health <= 0) this._recordElimination(player, null);
+        this._applyGuardianDamage(player, NEXUS_GUARDIAN_AOE_DAMAGE);
       }
       this.events.push({
         text: '💠 NEXUS GUARDIAN unleashed a pulse wave',
@@ -1612,15 +1619,13 @@ export class Game {
         lineWidth: 5,
         gravity: 0,
       }));
-      guardian.nextAttack = 'target';
       return;
     }
 
     const target = targets.sort((a, b) =>
       Math.hypot(a.x - guardian.x, a.y - guardian.y) - Math.hypot(b.x - guardian.x, b.y - guardian.y),
     )[0];
-    target.markCombat(this.elapsed);
-    target.health -= NEXUS_GUARDIAN_TARGET_DAMAGE;
+    this._applyGuardianDamage(target, NEXUS_GUARDIAN_TARGET_DAMAGE);
     this.sparks.push(...Particle.burst(target.x, target.y, '#7de6ff', 10, {
       speedMin: 60,
       speedMax: 180,
@@ -1635,7 +1640,6 @@ export class Game {
       faction: target.faction,
       ttl: 2.5,
     });
-    if (target.health <= 0) this._recordElimination(target, null);
     guardian.nextAttack = 'aoe';
   }
 

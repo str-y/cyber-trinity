@@ -177,7 +177,7 @@ export class HUD {
         <div class="feature-line"><span>WHEN</span><b id="feature-when">—</b></div>
         <div class="feature-line"><span>WHAT</span><b id="feature-what">—</b></div>
         <div class="feature-line"><span>STATUS</span><b id="feature-status">PENDING</b></div>
-        <div class="panel-title blue" style="margin-top:6px">NEXUS GUARDIAN</div>
+        <div class="panel-title blue panel-subtitle-spaced">NEXUS GUARDIAN</div>
         <div class="feature-line"><span>STATE</span><b id="guardian-status">SPAWN IN 2:00</b></div>
         <div class="feature-line"><span>VITALS</span><b id="guardian-vitals">OFFLINE</b></div>
         <div class="feature-line"><span>BLESSING</span><b id="guardian-blessing">—</b></div>
@@ -444,15 +444,15 @@ export class HUD {
       status.textContent = 'ACTIVE';
       vitals.textContent = `${Math.ceil(guardian.health)} / ${guardian.maxHealth}`;
     } else if (guardian.state === 'respawning') {
-      status.textContent = `RESPAWN ${this._formatTimer(guardian.timer)}`;
+      status.textContent = `RESPAWN IN ${this._formatTimer(guardian.timer)}`;
       vitals.textContent = `HP ×${(1.5 ** guardian.spawnCount).toFixed(2)}`;
     } else {
-      status.textContent = `SPAWN ${this._formatTimer(guardian.timer)}`;
+      status.textContent = `SPAWN IN ${this._formatTimer(guardian.timer)}`;
       vitals.textContent = 'OFFLINE';
     }
 
     const activeBlessing = Object.entries(world.guardianBlessings ?? {})
-      .sort((a, b) => (b[1]?.timer ?? 0) - (a[1]?.timer ?? 0))[0];
+      .find(([, buff]) => (buff?.timer ?? 0) > 0);
     blessing.textContent = activeBlessing
       ? `${activeBlessing[0].toUpperCase()} ${Math.ceil(activeBlessing[1].timer)}s`
       : '—';
