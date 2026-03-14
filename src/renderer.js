@@ -5,6 +5,7 @@
  */
 
 import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+import { resolveArmorColor, resolveEffectColor } from './customization.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -481,19 +482,54 @@ export class Renderer {
   _drawTrail(player) {
     const ctx  = this.ctx;
     const pts  = player.trailPoints;
-    const col  = FACTIONS[player.faction].color;
+    const col  = player.appearance
+      ? resolveEffectColor(player.appearance.effectColor)
+      : FACTIONS[player.faction].color;
+    const trailEffect = player.appearance?.trailEffect ?? 'sparks';
     if (pts.length < 2) return;
     ctx.save();
-    for (let i = 1; i < pts.length; i++) {
-      const p0 = pts[i - 1], p1 = pts[i];
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = withAlpha(col, p1.a * 0.55);
-      ctx.lineWidth   = 2.5 * p1.a;
-      ctx.shadowBlur  = 6;
-      ctx.shadowColor = col;
-      ctx.stroke();
+    if (trailEffect === 'data') {
+      ctx.fillStyle = withAlpha(col, 0.85);
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.35);
+        ctx.lineWidth = 1.2 * p1.a;
+        ctx.setLineDash([3, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillRect(p1.x - 1.5, p1.y - 1.5, 3 * p1.a, 3 * p1.a);
+      }
+    } else if (trailEffect === 'hologram') {
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y - 2);
+        ctx.lineTo(p1.x, p1.y - 2);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.28);
+        ctx.lineWidth = 4 * p1.a;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y + 1);
+        ctx.lineTo(p1.x, p1.y + 1);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.7);
+        ctx.lineWidth = 1.6 * p1.a;
+        ctx.stroke();
+      }
+    } else {
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.55);
+        ctx.lineWidth   = 2.5 * p1.a;
+        ctx.shadowBlur  = 6;
+        ctx.shadowColor = col;
+        ctx.stroke();
+      }
     }
     ctx.restore();
   }
@@ -503,7 +539,15 @@ export class Renderer {
   _drawPlayer(player) {
     const ctx = this.ctx;
     const f   = FACTIONS[player.faction];
-    const { r, g, b } = hexToRgb(f.color);
+    const armorColor = player.appearance
+      ? resolveArmorColor(f.color, player.appearance.armorColor)
+      : f.color;
+    const effectColor = player.appearance
+      ? resolveEffectColor(player.appearance.effectColor)
+      : f.color;
+    const { r, g, b } = hexToRgb(armorColor);
+    const effectRgb = hexToRgb(effectColor);
+    const factionRgb = hexToRgb(f.color);
 
     ctx.save();
     ctx.translate(player.x, player.y);
@@ -511,7 +555,7 @@ export class Renderer {
     if (!player.alive) {
       // Ghost (respawning)
       ctx.globalAlpha = 0.25;
-      ctx.fillStyle   = f.color;
+      ctx.fillStyle   = armorColor;
       ctx.beginPath();
       ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
       ctx.fill();
@@ -521,11 +565,11 @@ export class Renderer {
 
     const glowA = 0.55 + 0.35 * Math.sin(player.glowPulse);
     ctx.shadowBlur  = 16;
-    ctx.shadowColor = f.color;
+    ctx.shadowColor = armorColor;
 
     // Body
     ctx.fillStyle   = `rgba(${r},${g},${b},0.25)`;
-    ctx.strokeStyle = `rgba(${r},${g},${b},${glowA})`;
+    ctx.strokeStyle = `rgba(${factionRgb.r},${factionRgb.g},${factionRgb.b},${glowA})`;
     ctx.lineWidth   = 2;
     ctx.beginPath();
     ctx.arc(0, 0, PLAYER_RADIUS, 0, Math.PI * 2);
@@ -533,14 +577,14 @@ export class Renderer {
     ctx.stroke();
 
     // Neon core dot
-    ctx.fillStyle   = `rgba(${r},${g},${b},0.9)`;
+    ctx.fillStyle   = `rgba(${effectRgb.r},${effectRgb.g},${effectRgb.b},0.9)`;
     ctx.beginPath();
     ctx.arc(0, 0, 3, 0, Math.PI * 2);
     ctx.fill();
 
     // Faction-specific overlay
     ctx.shadowBlur  = 0;
-    ctx.strokeStyle = `rgba(${r},${g},${b},0.75)`;
+    ctx.strokeStyle = `rgba(${factionRgb.r},${factionRgb.g},${factionRgb.b},0.75)`;
     ctx.lineWidth   = 1;
     if (player.faction === 'blue') {
       // Crosshair (sniper)
@@ -584,7 +628,7 @@ export class Renderer {
 
     const jobEmoji = { warrior: '⚔️', mage: '🔮', healer: '💚', scout: '💨' };
     const itemLabel = jobEmoji[player.job] ?? '⚔️';
-    ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+    ctx.fillStyle = `rgba(${effectRgb.r},${effectRgb.g},${effectRgb.b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(itemLabel, 0, PLAYER_RADIUS + 16);
@@ -639,13 +683,14 @@ export class Renderer {
     ctx.save();
     for (const proj of projectiles) {
       const f   = FACTIONS[proj.faction];
-      const { r, g, b } = hexToRgb(f.color);
+      const color = proj.effectColor ?? f.color;
+      const { r, g, b } = hexToRgb(color);
       const a   = proj.alpha;
 
       if (proj.type === 'railshot') {
         // Bright energy bolt with glow trail
         ctx.shadowBlur  = this.lowQuality ? 8 : 16;
-        ctx.shadowColor = f.color;
+        ctx.shadowColor = color;
         ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
         ctx.lineWidth   = 3;
         ctx.beginPath();
@@ -662,7 +707,7 @@ export class Renderer {
         ctx.strokeStyle = `rgba(${r},${g},${b},${a * pulse * 0.6})`;
         ctx.lineWidth   = 2;
         ctx.shadowBlur  = this.lowQuality ? 6 : 14;
-        ctx.shadowColor = f.color;
+        ctx.shadowColor = color;
         ctx.beginPath();
         ctx.arc(proj.x, proj.y, proj.radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -675,7 +720,7 @@ export class Renderer {
       } else if (proj.type === 'powerdash') {
         // Blazing charge trail
         ctx.shadowBlur  = this.lowQuality ? 6 : 12;
-        ctx.shadowColor = f.color;
+        ctx.shadowColor = color;
         ctx.fillStyle   = `rgba(${r},${g},${b},${a * 0.8})`;
         ctx.beginPath();
         ctx.arc(proj.x, proj.y, proj.radius * a, 0, Math.PI * 2);

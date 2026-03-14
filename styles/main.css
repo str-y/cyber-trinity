@@ -1090,7 +1090,7 @@ body.crt-disabled #scanlines {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  min-width: 280px;
+  min-width: 320px;
   display: none;
   flex-direction: column;
   gap: 10px;
@@ -1118,6 +1118,15 @@ body.crt-disabled #scanlines {
 
 .settings-header .panel-title {
   margin-bottom: 0;
+}
+
+.settings-section-title {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(100, 180, 255, 0.12);
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: rgba(160, 212, 255, 0.72);
 }
 
 .settings-hint {
@@ -1157,6 +1166,12 @@ body.crt-disabled #scanlines {
   width: 16px;
   height: 16px;
   accent-color: #4aa8ff;
+}
+
+.settings-note {
+  font-size: 9px;
+  line-height: 1.5;
+  color: rgba(216, 236, 255, 0.62);
 }
 
 body.hud-hidden #hud > :not(#settings-panel):not(#scanlines) {
