@@ -405,13 +405,14 @@ export class Player {
     this.attackTimer -= dt;
 
     const rallying = this._applyRallyCommand(world);
+    const pinning = !rallying && this._applyPinCommand(world);
 
     // ── Hate control: bias toward leading team ──────────────────────────────
     // Fighters prefer to target the leading faction
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    if (!rallying) {
+    if (!rallying && !pinning) {
       switch (this.role) {
         case 'collector': this._aiCollector(world, homeBase); break;
         case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
@@ -513,6 +514,58 @@ export class Player {
       x: signal.x + Math.cos(angle) * spread,
       y: signal.y + Math.sin(angle) * spread,
     };
+    this.state = 'rally';
+    return true;
+  }
+
+  _applyPinCommand(world) {
+    const pin = world._getActivePinForFaction?.(this.faction);
+    if (!pin || this.isPlayerControlled) return false;
+
+    const enemy = world._nearestEnemy(pin.x, pin.y, this.faction);
+    const enemyNearPin = enemy && dist(enemy.x, enemy.y, pin.x, pin.y) <= pin.radius;
+    const angle = (this.index / 5) * Math.PI * 2;
+    const spread = 16 + this.index * 7;
+    const formationPoint = {
+      x: pin.x + Math.cos(angle) * spread,
+      y: pin.y + Math.sin(angle) * spread,
+    };
+
+    if (pin.type === 'danger') {
+      if (enemyNearPin && this.role !== 'collector') {
+        this.target = enemy;
+        this.state = 'attack';
+        return true;
+      }
+      this.target = formationPoint;
+      this.state = 'defend';
+      return true;
+    }
+
+    if (pin.type === 'crystal') {
+      const crystal = world._nearestFreeCrystalInZone?.(pin.x, pin.y, pin.radius);
+      if (crystal && (this.role === 'collector' || this.role === 'defender' || Math.random() < 0.45)) {
+        this.target = crystal;
+        this.state = 'carry';
+        return true;
+      }
+      if (enemyNearPin && this.role === 'fighter') {
+        this.target = enemy;
+        this.state = 'attack';
+        return true;
+      }
+      this.target = formationPoint;
+      this.state = 'rally';
+      return true;
+    }
+
+    if (enemyNearPin && this.role === 'fighter') {
+      this.target = enemy;
+      this.state = 'attack';
+      return true;
+    }
+
+    this.target = formationPoint;
     this.state = 'rally';
     return true;
   }

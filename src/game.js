@@ -26,6 +26,16 @@ const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
 const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
+const BASE_ALERT_RANGE = BASE_RADIUS + 84;
+const BASE_ALERT_COOLDOWN = 5;
+const DEATH_MARKER_DURATION = 5;
+const PIN_DURATION = 10;
+
+const PIN_TYPES = {
+  gather:  { label: '集合', emoji: '📍', radius: 130 },
+  danger:  { label: '危険', emoji: '⚠️', radius: 165 },
+  crystal: { label: 'クリスタル', emoji: '💎', radius: 140 },
+};
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -182,6 +192,13 @@ export class Game {
     this._rallyLatch = false;
     this.focusedEnemy = null;
     this.rallySignal = null;
+    this.minimapPins = [];
+    this.recentDeaths = [];
+    this.baseAttackAlerts = {
+      blue: { active: false, cooldown: 0 },
+      green: { active: false, cooldown: 0 },
+      red: { active: false, cooldown: 0 },
+    };
     this._bindInput();
 
     // ── Alliance (temporary 2-vs-1 pact) ─────────────────────────────────
@@ -305,6 +322,14 @@ export class Game {
     window.addEventListener('keyup', e => {
       if (setKey(e.code, false)) e.preventDefault();
     });
+    this.canvas.addEventListener('click', e => this._handleCanvasClick(e));
+  }
+
+  _handleCanvasClick(event) {
+    const point = this.renderer.screenToMinimapWorld?.(event.clientX, event.clientY, this);
+    if (!point) return;
+    this._issueMinimapPin(point.x, point.y);
+    event.preventDefault();
   }
 
   _positionBases() {
@@ -456,6 +481,7 @@ export class Game {
     // Alliance evaluation (before AI so targeting reflects current pact)
     this._updateAlliance();
     this._updateCommandState(dt);
+    this._updateMinimapAlerts(dt);
 
     // Players
     for (const player of this.players) {
@@ -875,6 +901,12 @@ export class Game {
 
     // Death penalty: drop ALL carried jewels
     victim.dropAllJewels(this);
+    this.recentDeaths.push({
+      x: victim.x,
+      y: victim.y,
+      faction: victim.faction,
+      timer: DEATH_MARKER_DURATION,
+    });
 
     this.audio.playElimination();
     if (killerPlayer?.passive?.id === 'overclock') {
@@ -970,6 +1002,13 @@ export class Game {
     this.alliance = null;
     this.focusedEnemy = null;
     this.rallySignal = null;
+    this.minimapPins = [];
+    this.recentDeaths = [];
+    this.baseAttackAlerts = {
+      blue: { active: false, cooldown: 0 },
+      green: { active: false, cooldown: 0 },
+      red: { active: false, cooldown: 0 },
+    };
 
     // Reset chaos events
     this.chaosEvent = null;
@@ -1063,6 +1102,19 @@ export class Game {
       const dx = p.x - x, dy = p.y - y;
       const d  = Math.sqrt(dx * dx + dy * dy);
       if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
+
+  _nearestFreeCrystalInZone(x, y, radius = Infinity) {
+    let best = null, bestD = Infinity;
+    for (const c of this.crystals) {
+      if (c.delivered || c.carrier) continue;
+      const dx = c.x - x, dy = c.y - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > radius || d >= bestD) continue;
+      best = c;
+      bestD = d;
     }
     return best;
   }
@@ -1212,6 +1264,10 @@ export class Game {
       this.rallySignal.timer = Math.max(0, this.rallySignal.timer - dt);
       if (this.rallySignal.timer <= 0) this.rallySignal = null;
     }
+    this.minimapPins = this.minimapPins.filter(pin => {
+      pin.timer = Math.max(0, pin.timer - dt);
+      return pin.timer > 0;
+    });
 
     const local = this.localPlayer;
     if (this.focusedEnemy && (!this.focusedEnemy.alive || !local ||
@@ -1295,6 +1351,60 @@ export class Game {
       faction: player.faction,
       ttl: 3,
     });
+  }
+
+  _issueMinimapPin(x, y) {
+    const player = this.localPlayer;
+    if (!player?.alive) return;
+    const type = this.hud.getSelectedPinType?.() ?? 'gather';
+    const spec = PIN_TYPES[type] ?? PIN_TYPES.gather;
+    this.minimapPins = this.minimapPins.filter(pin => pin.faction !== player.faction);
+    this.minimapPins.push({
+      faction: player.faction,
+      type,
+      x,
+      y,
+      radius: spec.radius,
+      timer: PIN_DURATION,
+    });
+    this.events.push({
+      text: `${spec.emoji} ${player.faction.toUpperCase()} issued ${spec.label} pin`,
+      faction: player.faction,
+      ttl: 3,
+    });
+  }
+
+  _getActivePinForFaction(faction) {
+    return this.minimapPins.find(pin => pin.faction === faction) ?? null;
+  }
+
+  _updateMinimapAlerts(dt) {
+    this.recentDeaths = this.recentDeaths.filter(marker => {
+      marker.timer = Math.max(0, marker.timer - dt);
+      return marker.timer > 0;
+    });
+    for (const alert of Object.values(this.baseAttackAlerts)) {
+      alert.cooldown = Math.max(0, alert.cooldown - dt);
+    }
+    for (const faction of ['blue', 'green', 'red']) {
+      const base = this.bases[faction];
+      const alert = this.baseAttackAlerts[faction];
+      const underAttack = this.players.some(player =>
+        player.alive &&
+        player.faction !== faction &&
+        !this._isAlly(faction, player.faction) &&
+        Math.hypot(player.x - base.x, player.y - base.y) <= BASE_ALERT_RANGE,
+      );
+      alert.active = underAttack;
+      if (underAttack && alert.cooldown <= 0) {
+        alert.cooldown = BASE_ALERT_COOLDOWN;
+        this.events.push({
+          text: `🚨 ${faction.toUpperCase()} base under attack`,
+          faction,
+          ttl: 2.5,
+        });
+      }
+    }
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────
