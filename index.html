@@ -12,13 +12,24 @@
     <!-- Main render surface -->
     <canvas id="game-canvas"></canvas>
 
-    <!-- Faction selection -->
-    <div id="faction-select-screen">
+    <!-- Lobby screen (shown first) -->
+    <div id="lobby-screen"></div>
+
+    <!-- Faction selection (shown after lobby) -->
+    <div id="faction-select-screen" style="display:none">
       <div id="faction-select-panel">
         <div class="select-kicker">CHOOSE YOUR FACTION</div>
         <h1>CYBER TRINITY</h1>
         <div id="faction-options"></div>
         <button id="deploy-button" type="button">DEPLOY AGENT</button>
+      </div>
+    </div>
+
+    <!-- 3-second countdown overlay -->
+    <div id="countdown-overlay" style="display:none">
+      <div id="countdown-inner">
+        <div id="countdown-number">3</div>
+        <div id="countdown-label">DEPLOYING AGENT…</div>
       </div>
     </div>
 
@@ -65,13 +76,18 @@
   <script type="module">
     import { Game } from './src/game.js';
     import { FACTIONS } from './src/entities.js';
+    import { initLobby } from './src/lobby.js';
 
-    const canvas = document.getElementById('game-canvas');
-    const screen = document.getElementById('faction-select-screen');
-    const options = document.getElementById('faction-options');
+    const canvas       = document.getElementById('game-canvas');
+    const lobbyScreen  = document.getElementById('lobby-screen');
+    const factionScreen = document.getElementById('faction-select-screen');
+    const countdownOverlay = document.getElementById('countdown-overlay');
+    const countdownNumber  = document.getElementById('countdown-number');
+    const options      = document.getElementById('faction-options');
     const deployButton = document.getElementById('deploy-button');
     let selectedFaction = 'blue';
 
+    // ── Faction selection rendering ────────────────────────────────────────
     const renderOptions = () => {
       options.innerHTML = Object.values(FACTIONS).map((faction) => `
         <button
@@ -95,11 +111,20 @@
       renderOptions();
     });
 
+    // ── Lobby init ────────────────────────────────────────────────────────
+    const lobby = initLobby(
+      { lobbyScreen, factionScreen, countdownOverlay, countdownNumber },
+      (config) => {
+        // Called after countdown: start the game with lobby config
+        const game = new Game(canvas, { ...config, playerFaction: config.playerFaction });
+        game.start();
+      },
+    );
+
+    // ── Deploy button: starts 3-second countdown ──────────────────────────
     deployButton.addEventListener('click', () => {
-      const game = new Game(canvas, { playerFaction: selectedFaction });
-      screen.style.display = 'none';
-      game.start();
-    }, { once: true });
+      lobby.startCountdown(selectedFaction);
+    });
 
     renderOptions();
   </script>

@@ -94,6 +94,17 @@ const FEATURE_CONTRACTS = [
   },
 ];
 
+// ── AI difficulty parameters ───────────────────────────────────────────────
+const AI_DIFFICULTY = {
+  easy:   { speedMult: 0.70, aggroMult: 0.60, abilityMult: 0.40 },
+  normal: { speedMult: 1.00, aggroMult: 1.00, abilityMult: 1.00 },
+  hard:   { speedMult: 1.20, aggroMult: 1.30, abilityMult: 1.60 },
+  expert: { speedMult: 1.40, aggroMult: 1.60, abilityMult: 2.20 },
+};
+
+// ── Starting crystal counts ────────────────────────────────────────────────
+const STARTING_CRYSTALS = { low: 6, normal: 12, high: 20 };
+
 export class Game {
   constructor(canvas, options = {}) {
     this.canvas   = canvas;
@@ -103,6 +114,21 @@ export class Game {
     this.running  = false;
     this._lastTs  = 0;
     this.playerFaction = options.playerFaction ?? 'blue';
+
+    // ── Lobby config (all settings from the pre-match lobby) ───────────────
+    this.config = {
+      matchDuration:      options.matchDuration      ?? MATCH_DURATION,
+      winScore:           options.winScore           ?? 0,
+      chaosEnabled:       options.chaosEnabled       ?? true,
+      chaosInterval:      options.chaosInterval      ?? CHAOS_EVENT_INTERVAL,
+      gameMode:           options.gameMode           ?? 'standard',
+      startingCrystals:   options.startingCrystals   ?? 'normal',
+      aiDifficulty: {
+        blue:  options.aiDifficulty?.blue  ?? 'normal',
+        green: options.aiDifficulty?.green ?? 'normal',
+        red:   options.aiDifficulty?.red   ?? 'normal',
+      },
+    };
 
     this.width  = 0;
     this.height = 0;
@@ -128,7 +154,7 @@ export class Game {
     this.winnerFaction = null;
     this.victoryTimer = 0;
     this.elapsed = 0;
-    this.matchTimer = MATCH_DURATION;   // countdown (seconds)
+    this.matchTimer = this.config.matchDuration;   // countdown (seconds)
     // Feature contract chain — current contract is featureContracts[featureIndex]
     this.featureContracts = FEATURE_CONTRACTS.map(c => ({
       ...c,
@@ -209,17 +235,27 @@ export class Game {
     // ── TriLock neutral bases ───────────────────────────────────────────
     this._spawnTriLocks();
 
-    // ── Players (5 per faction) ───────────────────────────────────────────
+    // ── Players (playersPerFaction per faction) ───────────────────────────
+    const playersPerFaction = this.config.gameMode === 'quick' ? 2 : 5;
     for (const faction of ['blue', 'green', 'red']) {
       const base = this.bases[faction];
-      for (let i = 0; i < 5; i++) {
-        const angle = (i / 5) * Math.PI * 2;
+      const diff = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
+      for (let i = 0; i < playersPerFaction; i++) {
+        const angle = (i / playersPerFaction) * Math.PI * 2;
         const r     = 40 + Math.random() * 20;
         const p = new Player(
           faction, i,
           base.x + Math.cos(angle) * r,
           base.y + Math.sin(angle) * r,
         );
+        // Apply AI difficulty scaling only to non-player-controlled agents.
+        // The human player is the first member (i === 0) of their chosen faction.
+        const isHumanPlayer = faction === this.playerFaction && i === 0;
+        if (!isHumanPlayer) {
+          p.speed                = Math.round(p.speed * diff.speedMult);
+          p.aggro                = Math.min(1, p.aggro * diff.aggroMult);
+          p.abilityDifficultyMult = diff.abilityMult;  // per-frame ability chance scalar
+        }
         // Stagger cooldowns
         p.cooldown = Math.random() * p.abilityMax;
         this.players.push(p);
@@ -325,11 +361,13 @@ export class Game {
   /**
    * Spawn jewels with value tiers. Higher-value jewels spawn closer to the centre.
    * Uses the JEWEL_TIERS weight distribution and distance-from-centre bias.
+   * Count is determined by the lobby startingCrystals config.
    */
   _spawnInitialJewels() {
     const W = this.width, H = this.height;
     const cx = W / 2, cy = H / 2;
-    for (let i = 0; i < CRYSTAL_COUNT; i++) {
+    const count = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    for (let i = 0; i < count; i++) {
       this.crystals.push(this._createJewel(cx, cy, W, H));
     }
   }
@@ -485,7 +523,7 @@ export class Game {
         }
         continue;
       }
-      if (player.alive && Math.random() < AI_ABILITY_CHANCE) {
+      if (player.alive && Math.random() < AI_ABILITY_CHANCE * (player.abilityDifficultyMult ?? 1)) {
         const proj = player.tryAbility(this);
         if (proj) {
           this.projectiles.push(proj);
@@ -513,10 +551,11 @@ export class Game {
 
     // Re-spawn delivered jewels (value-tiered, centre-weighted)
     const active = this.crystals.filter(c => !c.delivered);
-    if (active.length < CRYSTAL_COUNT * 0.5) {
+    const crystalTarget = STARTING_CRYSTALS[this.config.startingCrystals] ?? CRYSTAL_COUNT;
+    if (active.length < crystalTarget * 0.5) {
       this.crystals = this.crystals.filter(c => !c.delivered);
       const cx = this.width / 2, cy = this.height / 2;
-      const toSpawn = CRYSTAL_COUNT - this.crystals.length;
+      const toSpawn = crystalTarget - this.crystals.length;
       for (let i = 0; i < toSpawn; i++) {
         this.crystals.push(this._createJewel(cx, cy, this.width, this.height));
       }
@@ -750,6 +789,8 @@ export class Game {
   // ── Chaos Events ─────────────────────────────────────────────────────────
 
   _updateChaosEvents(dt) {
+    if (!this.config.chaosEnabled) return;
+
     // Tick active event
     if (this.chaosEvent) {
       this.chaosEvent.remaining -= dt;
@@ -772,7 +813,7 @@ export class Game {
           ttl: 3,
         });
         this.chaosEvent = null;
-        this.chaosEventTimer = CHAOS_EVENT_INTERVAL;
+        this.chaosEventTimer = this.config.chaosInterval;
       }
       return;
     }
@@ -871,7 +912,26 @@ export class Game {
 
   _checkMatchEnd() {
     if (this.matchEnded) return;
-    // Time-based match end (5 minutes) — winner has the most points
+
+    // Score-based match end (when winScore > 0 and a faction reaches it)
+    if (this.config.winScore > 0) {
+      for (const faction of ['blue', 'green', 'red']) {
+        if ((this.scores[faction] ?? 0) >= this.config.winScore) {
+          this.matchEnded = true;
+          this.winnerFaction = faction;
+          this.victoryTimer = 5;
+          this.audio.playMatchEnd(this.winnerFaction);
+          this.events.push({
+            text: `🏆 ${this.winnerFaction.toUpperCase()} reached ${this.config.winScore} pts — VICTORY!`,
+            faction: this.winnerFaction,
+            ttl: 5,
+          });
+          return;
+        }
+      }
+    }
+
+    // Time-based match end — winner has the most points
     if (this.matchTimer <= 0) {
       this.matchEnded = true;
       const ranking = ['blue', 'green', 'red']
@@ -900,7 +960,7 @@ export class Game {
     this.winnerFaction = null;
     this.victoryTimer = 0;
     this.elapsed = 0;
-    this.matchTimer = MATCH_DURATION;
+    this.matchTimer = this.config.matchDuration;
     this.events = [];
     this.projectiles = [];
     this.sparks = [];
@@ -925,9 +985,10 @@ export class Game {
     this.featureIndex = 0;
 
     // Reset players
+    const playersPerFaction = this.config.gameMode === 'quick' ? 2 : 5;
     for (const player of this.players) {
       const base = this.bases[player.faction];
-      const angle = (player.index / 5) * Math.PI * 2;
+      const angle = (player.index / playersPerFaction) * Math.PI * 2;
       const r = 40 + Math.random() * 20;
       player.x = base.x + Math.cos(angle) * r;
       player.y = base.y + Math.sin(angle) * r;
