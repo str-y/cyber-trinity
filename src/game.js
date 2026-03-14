@@ -767,7 +767,7 @@ export class Game {
   _getPlayerEffectColor(player) {
     return player?.appearance
       ? resolveEffectColor(player.appearance.effectColor)
-      : FACTIONS[player?.faction]?.color;
+      : FACTIONS[player?.faction]?.color ?? '#7df2ff';
   }
 
   _spawnDeathEffect(player) {
