@@ -94,13 +94,14 @@ const FEATURE_CONTRACTS = [
 ];
 
 export class Game {
-  constructor(canvas) {
+  constructor(canvas, options = {}) {
     this.canvas   = canvas;
     this.renderer = new Renderer(canvas);
     this.hud      = new HUD();
     this.audio    = new AudioEngine();
     this.running  = false;
     this._lastTs  = 0;
+    this.playerFaction = options.playerFaction ?? 'blue';
 
     this.width  = 0;
     this.height = 0;
@@ -223,7 +224,9 @@ export class Game {
         this.players.push(p);
       }
     }
-    this.localPlayer = this.players.find(p => p.faction === 'blue') ?? null;
+    this.localPlayer = this.players.find(p => p.faction === this.playerFaction)
+      ?? this.players.find(p => p.faction === 'blue')
+      ?? null;
     if (this.localPlayer) this.localPlayer.isPlayerControlled = true;
 
     // ── Jewels (value-tiered, centre-weighted) ─────────────────────────
@@ -419,6 +422,7 @@ export class Game {
     for (const player of this.players) {
       if (player.isPlayerControlled) this._updateLocalPlayer(player, dt);
       else player.update(dt, this);
+      this._updatePassiveEffects(player, dt);
       // Energy regeneration (buffed by faction overclock, blocked by EMP Storm)
       if (player.alive && player.energy < 100) {
         let regenBlocked = false;
@@ -435,6 +439,10 @@ export class Game {
           player.energy = Math.min(100, player.energy + 8 * regenMult * dt);
         }
       }
+      if (player.alive && player.passiveState?.bioRegenActive) {
+        const regenPerSec = player.maxHealth * (player.passive.regenPctPerSec ?? 0);
+        player.health = Math.min(player.maxHealth, player.health + regenPerSec * dt);
+      }
       // Faction heal-over-time buff (Deploy Firewall)
       const healBuff = this.factionBuffs[player.faction]?.healPerSec;
       if (player.alive && healBuff) {
@@ -442,7 +450,12 @@ export class Game {
       }
 
       const buff = this.factionBuffs[player.faction];
-      if (player.alive && buff) {
+      const passiveAura = player.passiveState?.deliveryBonusActive ||
+        player.passiveState?.bioRegenActive ||
+        player.passiveState?.nearbyAllyBonus ||
+        player.passiveState?.overclockStacks > 0 ||
+        player.passiveState?.sprintActive;
+      if (player.alive && (buff || passiveAura)) {
         player.auraTimer -= dt;
         if (player.auraTimer <= 0) {
           this.sparks.push(...Particle.aura(player.x, player.y, FACTIONS[player.faction].color, 2));
@@ -568,7 +581,8 @@ export class Game {
       player.respawnTimer -= dt;
       if (player.respawnTimer <= 0) {
         player.alive = true;
-        player.health = player.maxHealth;
+        player.maxHealth = player.baseMaxHealth;
+        player.health = player.baseMaxHealth;
         const base = this.bases[player.faction];
         player.x = base.x + (Math.random() - 0.5) * 60;
         player.y = base.y + (Math.random() - 0.5) * 60;
@@ -581,7 +595,8 @@ export class Game {
 
     const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
-    const speedMult = this.factionBuffs?.[player.faction]?.speedMult ?? 1;
+    const speedMult = (this.factionBuffs?.[player.faction]?.speedMult ?? 1) *
+      (player.passiveState?.speedMult ?? 1);
     const effSpeed = player.speed * speedMult;
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy) || 1;
@@ -604,7 +619,7 @@ export class Game {
         let totalScore = 0;
         for (const jewel of player.carrying) {
           const pts = deliveryBase.deliverJewel(jewel.value);
-          totalScore += pts;
+          totalScore += this._applyDeliveryPassive(player, deliveryBase, pts);
           jewel.delivered = true;
           this.sparks.push(...Particle.burst(deliveryBase.x, deliveryBase.y, jewel.tierColor, 5, {
             speedMin: 70,
@@ -674,10 +689,12 @@ export class Game {
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
           this._registerDamage(p, proj.faction);
+          proj.owner?.markCombat(this.elapsed);
+          p.markCombat(this.elapsed);
           p.health -= proj.damage;
           this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
           if (p.health <= 0) {
-            this._recordElimination(p, proj.faction, 'ability KO');
+            this._recordElimination(p, proj.owner ?? proj.faction, 'ability KO');
           }
           proj.hit = true;
           break;
@@ -799,6 +816,8 @@ export class Game {
   }
 
   _recordElimination(victim, killerFaction, reason = 'eliminated') {
+    const killerPlayer = typeof killerFaction === 'string' ? null : killerFaction;
+    const killerSide = killerPlayer?.faction ?? killerFaction;
     victim.alive = false;
     victim.respawnTimer = 5;
     this.sparks.push(...Particle.burst(victim.x, victim.y, FACTIONS[victim.faction].color, 18, {
@@ -816,19 +835,25 @@ export class Game {
     victim.dropAllJewels(this);
 
     this.audio.playElimination();
-    this.stats[killerFaction].kills++;
+    if (killerPlayer?.passive?.id === 'overclock') {
+      killerPlayer.passiveState.overclockStacks = Math.min(
+        killerPlayer.passive.maxStacks,
+        (killerPlayer.passiveState.overclockStacks ?? 0) + 1,
+      );
+    }
+    this.stats[killerSide].kills++;
     this.stats[victim.faction].deaths++;
-    this.scores[killerFaction] += KILL_SCORE;
+    this.scores[killerSide] += KILL_SCORE;
     this.events.push({
-      text: `${killerFaction.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
-      faction: killerFaction,
+      text: `${killerSide.toUpperCase()} ${reason} ${victim.faction.toUpperCase()} (+${KILL_SCORE})`,
+      faction: killerSide,
       ttl: 3,
     });
 
     const ledger = this.damageLedger.get(victim);
     if (ledger) {
       for (const [assistFaction, hitTime] of ledger.entries()) {
-        if (assistFaction === killerFaction) continue;
+        if (assistFaction === killerSide) continue;
         if ((this.elapsed - hitTime) > ASSIST_WINDOW) continue;
         this.stats[assistFaction].assists++;
         this.scores[assistFaction] += ASSIST_SCORE;
@@ -905,13 +930,22 @@ export class Game {
       const r = 40 + Math.random() * 20;
       player.x = base.x + Math.cos(angle) * r;
       player.y = base.y + Math.sin(angle) * r;
-      player.health = player.maxHealth;
+      player.health = player.baseMaxHealth;
+      player.maxHealth = player.baseMaxHealth;
       player.energy = 100;
       player.alive = true;
       player.respawnTimer = 0;
       player.carrying = [];
       player.cooldown = Math.random() * player.abilityMax;
       player.trailPoints = [];
+      player.lastCombatTime = -Infinity;
+      player.passiveState.deliveryBonusActive = false;
+      player.passiveState.bioRegenActive = false;
+      player.passiveState.bioRegenDelayRemaining = 0;
+      player.passiveState.nearbyAllyBonus = false;
+      player.passiveState.overclockStacks = 0;
+      player.passiveState.speedMult = 1;
+      player.passiveState.sprintActive = false;
     }
 
     // Reset home bases
@@ -988,6 +1022,68 @@ export class Game {
       if (d < bestD) { bestD = d; best = tl; }
     }
     return best;
+  }
+
+  _updatePassiveEffects(player, dt) {
+    const state = player.passiveState;
+    if (!state) return;
+
+    state.deliveryBonusActive = false;
+    state.bioRegenActive = false;
+    state.speedMult = 1;
+    state.sprintActive = false;
+    state.minimapVisionRadius = player.passive?.minimapVisionRadius ?? 240;
+
+    if (!player.alive) {
+      player.maxHealth = player.baseMaxHealth;
+      state.nearbyAllyBonus = false;
+      state.bioRegenDelayRemaining = 0;
+      return;
+    }
+
+    if (player.passive?.id === 'data-cache') {
+      const ownedBase = this._nearestOwnedBase(player.x, player.y, player.faction);
+      state.deliveryBonusActive = !!ownedBase &&
+        Math.hypot(player.x - ownedBase.x, player.y - ownedBase.y) <= ownedBase.radius;
+      return;
+    }
+
+    if (player.passive?.id === 'bio-regen') {
+      const adjacentRange = player.radius * 3.5;
+      const adjacentAlly = this.players.some(other =>
+        other !== player &&
+        other.alive &&
+        other.faction === player.faction &&
+        Math.hypot(player.x - other.x, player.y - other.y) <= adjacentRange,
+      );
+      state.nearbyAllyBonus = adjacentAlly;
+      player.maxHealth = Math.round(player.baseMaxHealth * (
+        adjacentAlly ? 1 + player.passive.allyMaxHealthBonus : 1
+      ));
+      if (player.health > player.maxHealth) player.health = player.maxHealth;
+      const elapsedSinceCombat = this.elapsed - player.lastCombatTime;
+      state.bioRegenDelayRemaining = Math.max(0, player.passive.regenDelay - elapsedSinceCombat);
+      state.bioRegenActive = elapsedSinceCombat >= player.passive.regenDelay &&
+        player.health < player.maxHealth;
+      return;
+    }
+
+    if (player.passive?.id === 'overclock') {
+      state.sprintActive = Math.hypot(player.vx, player.vy) > player.speed * 0.55;
+      state.speedMult = state.sprintActive ? player.passive.sprintSpeedMult : 1;
+      state.overclockStacks = Math.min(player.passive.maxStacks, state.overclockStacks ?? 0);
+      return;
+    }
+
+    player.maxHealth = player.baseMaxHealth;
+  }
+
+  _applyDeliveryPassive(player, base, points) {
+    if (player.passive?.id !== 'data-cache') return points;
+    const inRange = Math.hypot(player.x - base.x, player.y - base.y) <= base.radius;
+    if (!inRange) return points;
+    player.passiveState.deliveryBonusActive = true;
+    return Math.round(points * player.passive.deliveryBonusMult);
   }
 
   /** Return the faction currently in the lead (highest score). */
