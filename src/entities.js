@@ -8,7 +8,7 @@
  *    ├─ update(dt, world)  — capture tick, shield pulse
  *    └─ tryCapture(faction, dt)
  *
- *  Player (Agent)          — one of four Jobs (Warrior / Mage / Healer / Scout)
+ *  Player (Agent)          — one of five Jobs (Warrior / Mage / Healer / Scout / Hacker)
  *    ├─ update(dt, world)  — AI + movement
  *    ├─ tryAbility(world)  — job-based skill set
  *    └─ dropAllJewels(world) — death penalty
@@ -88,7 +88,7 @@ export const FACTIONS = {
   },
 };
 
-/** Job definitions — each team fields all four jobs. */
+/** Job definitions — each team fields all five jobs. */
 export const JOBS = {
   warrior: {
     id: 'warrior',
@@ -142,10 +142,23 @@ export const JOBS = {
     ],
     ultimate: { name: 'Shadow Step', type: 'shadowstep', cost: 50, cooldown: 18, damage: 30 },
   },
+  hacker: {
+    id: 'hacker',
+    label: 'Hacker',
+    emoji: '💻',
+    speed: 66,
+    maxHealth: 76,
+    aggro: 0.55,
+    skills: [
+      { name: 'Exploit', type: 'exploit', cost: 24, cooldown: 5, damage: 0 },
+      { name: 'Data Spike', type: 'dataspike', cost: 30, cooldown: 9, damage: 0 },
+    ],
+    ultimate: { name: 'System Breach', type: 'systembreach', cost: 65, cooldown: 24, damage: 0 },
+  },
 };
 
-/** Per-team job assignment for indices 0–4: 2 Warriors, 1 Mage, 1 Healer, 1 Scout */
-const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'warrior'];
+/** Per-team job assignment for indices 0–4: 1 Warrior, 1 Mage, 1 Healer, 1 Scout, 1 Hacker */
+const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
 
 export const PLAYER_RADIUS = 9;
 export const BASE_RADIUS   = 52;
@@ -212,10 +225,14 @@ export class Base {
     this.level = faction ? 1 : 0;    // 0 = neutral, 1–3 = captured levels
     this.highValue = false;
     this.highValueMultiplier = 1;
+    this.capturePausedTimer = 0;
+    this.scoreDisabledTimer = 0;
   }
 
   update(dt) {
     this.shieldPulse += dt * 1.4;
+    if (this.capturePausedTimer > 0) this.capturePausedTimer = Math.max(0, this.capturePausedTimer - dt);
+    if (this.scoreDisabledTimer > 0) this.scoreDisabledTimer = Math.max(0, this.scoreDisabledTimer - dt);
   }
 
   /**
@@ -264,6 +281,7 @@ export class Base {
 
   /** Deliver jewels → level up the TriLock and return delivery score. */
   deliverJewel(value) {
+    if (this.scoreDisabledTimer > 0) return 0;
     this.crystalsStored += 1;
     // Level-up thresholds
     if (this.crystalsStored >= TRILOCK_LEVEL_3_THRESHOLD && this.level < 3) this.level = 3;
@@ -316,6 +334,8 @@ export class Player {
     this.cooldown = 0;
     this.cooldown2 = 0;
     this.ultCooldown = 0;
+    this.abilitySealTimer = 0;
+    this.hackLinkTimer = 0;
     this.aiDisabled = !!options.aiDisabled;
     this.isDummy = !!options.isDummy;
     this.setJob(jobId, { refillEnergy: true, resetCooldowns: true, preserveHealthRatio: false });
@@ -334,6 +354,8 @@ export class Player {
         this.cooldown = 0;
         this.cooldown2 = 0;
         this.ultCooldown = 0;
+        this.abilitySealTimer = 0;
+        this.hackLinkTimer = 0;
         const point = world.getRespawnPoint?.(this);
         if (point) {
           this.x = point.x;
@@ -351,6 +373,8 @@ export class Player {
     if (this.cooldown > 0)     this.cooldown     = Math.max(0, this.cooldown - dt);
     if (this.cooldown2 > 0)    this.cooldown2    = Math.max(0, this.cooldown2 - dt);
     if (this.ultCooldown > 0)  this.ultCooldown  = Math.max(0, this.ultCooldown - dt);
+    if (this.abilitySealTimer > 0) this.abilitySealTimer = Math.max(0, this.abilitySealTimer - dt);
+    if (this.hackLinkTimer > 0) this.hackLinkTimer = Math.max(0, this.hackLinkTimer - dt);
     if (this.aiDisabled) {
       this.vx *= 0.7;
       this.vy *= 0.7;
@@ -410,7 +434,8 @@ export class Player {
 
     if (refillEnergy) this.energy = 100;
 
-    if (nextJobId === 'scout' || nextJobId === 'healer') this.role = 'collector';
+    if (nextJobId === 'hacker') this.role = 'controller';
+    else if (nextJobId === 'scout' || nextJobId === 'healer') this.role = 'collector';
     else if (this.index === 4) this.role = 'defender';
     else this.role = 'fighter';
   }
@@ -462,6 +487,7 @@ export class Player {
       switch (this.role) {
         case 'collector': this._aiCollector(world, homeBase); break;
         case 'fighter':   this._aiFighter(world, homeBase, leadFaction);   break;
+        case 'controller': this._aiController(world, homeBase, leadFaction); break;
         case 'defender':  this._aiDefender(world, homeBase);  break;
       }
     }
@@ -494,7 +520,7 @@ export class Player {
       const enemy = world._nearestEnemy(this.x, this.y, this.faction);
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
         this.attackTimer = 0.6;
-        const baseDmg = this.job === 'warrior' ? 22 : this.job === 'mage' ? 18 : this.job === 'scout' ? 15 : 10;
+        const baseDmg = this.job === 'warrior' ? 22 : this.job === 'mage' ? 18 : this.job === 'scout' ? 15 : this.job === 'hacker' ? 12 : 10;
         const dmgMult = world.factionBuffs?.[this.faction]?.damageMult ?? 1;
         const dmg = baseDmg * dmgMult;
         world._registerDamage(enemy, this.faction);
@@ -682,6 +708,35 @@ export class Player {
   }
 
   // Defender: base patrol (restricted to patrol radius around own base)
+  _aiController(world, base, leadFaction) {
+    const hackTarget = world._nearestHackableTriLock?.(this.x, this.y, this.faction);
+    const breachTarget = world._nearestEnemyBaseTarget?.(this.x, this.y, this.faction);
+    const enemy = leadFaction && leadFaction !== this.faction
+      ? world._nearestEnemyOfFaction(this.x, this.y, leadFaction) ?? world._nearestEnemy(this.x, this.y, this.faction)
+      : world._nearestEnemy(this.x, this.y, this.faction);
+
+    if (hackTarget && (hackTarget.capturePausedTimer ?? 0) <= 0) {
+      this.target = hackTarget;
+      this.state = 'capture';
+      return;
+    }
+
+    if (enemy && Math.random() < 0.65) {
+      this.target = enemy;
+      this.state = 'attack';
+      return;
+    }
+
+    if (breachTarget && Math.random() < 0.5) {
+      this.target = breachTarget;
+      this.state = 'attack';
+      return;
+    }
+
+    this._aiDefender(world, base);
+  }
+
+  // Defender: base patrol (restricted to patrol radius around own base)
   _aiDefender(world, base) {
     const PATROL_RADIUS = 140;
 
@@ -769,12 +824,55 @@ export class Player {
    * Returns a Projectile or null if conditions aren't met.
    */
   tryAbility(world) {
-    if (this.cooldown > 0 || this.energy < this.abilityCost || !this.alive) return null;
+    return this._trySkill(world, 'primary');
+  }
 
-    const enemy = world._nearestEnemy(this.x, this.y, this.faction);
-    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
+  trySecondaryAbility(world) {
+    if (this.job !== 'hacker') return null;
+    return this._trySkill(world, 'secondary');
+  }
 
-    this.energy  -= this.abilityCost;
+  tryUltimate(world) {
+    if (this.job !== 'hacker') return null;
+    return this._trySkill(world, 'ultimate');
+  }
+
+  _getSkillSpec(slot) {
+    if (slot === 'secondary') {
+      return {
+        skill: this.jobDef.skills[1],
+        cooldownKey: 'cooldown2',
+        cooldownMax: this.ability2Max,
+        cost: this.ability2Cost,
+      };
+    }
+    if (slot === 'ultimate') {
+      return {
+        skill: this.jobDef.ultimate,
+        cooldownKey: 'ultCooldown',
+        cooldownMax: this.ultMax,
+        cost: this.ultCost,
+      };
+    }
+    return {
+      skill: this.jobDef.skills[0],
+      cooldownKey: 'cooldown',
+      cooldownMax: this.abilityMax,
+      cost: this.abilityCost,
+    };
+  }
+
+  _trySkill(world, slot) {
+    const { skill, cooldownKey, cooldownMax, cost } = this._getSkillSpec(slot);
+    if (!skill || !this.alive || this.abilitySealTimer > 0 || this[cooldownKey] > 0 || this.energy < cost) return null;
+
+    if (skill.type === 'dataspike' && this.job !== 'hacker') return null;
+    if (skill.type === 'systembreach' && this.job !== 'hacker') return null;
+
+    const target = this._resolveSkillTarget(world, skill);
+    if (!target) return null;
+
+    this.energy -= cost;
     const cooldownReduction = (this.passive?.id === 'overclock')
       ? (this.passive.cooldownReductionPerStack * Math.min(
         this.passive.maxStacks,
@@ -782,40 +880,82 @@ export class Player {
       ))
       : 0;
     const cooldownMult = world._getAbilityCooldownMultiplier?.() ?? 1;
-    this.cooldown = Math.max(0, this.abilityMax * cooldownMult - cooldownReduction);
+    this[cooldownKey] = Math.max(0, cooldownMax * cooldownMult - cooldownReduction);
     if (this.passive?.id === 'overclock' && this.passiveState) {
       this.passiveState.overclockStacks = 0;
     }
     this.markCombat(world.elapsed ?? 0);
 
-    const dx = enemy.x - this.x;
-    const dy = enemy.y - this.y;
-    const [nx, ny] = normalise(dx, dy);
+    if (skill.type === 'dataspike') this.hackLinkTimer = Math.max(this.hackLinkTimer, 4);
+    else if (skill.type === 'systembreach') this.hackLinkTimer = Math.max(this.hackLinkTimer, 10);
 
-    const skill = this.jobDef.skills[0];
+    return this._createSkillProjectile(skill, target);
+  }
+
+  _resolveSkillTarget(world, skill) {
+    if (skill.type === 'dataspike') {
+      const base = world._nearestHackableTriLock?.(this.x, this.y, this.faction);
+      return base ? { x: base.x, y: base.y, target: base } : null;
+    }
+    if (skill.type === 'systembreach') {
+      const base = world._nearestEnemyBaseTarget?.(this.x, this.y, this.faction);
+      return base ? { x: base.x, y: base.y, target: base } : null;
+    }
+    const enemy = world._nearestEnemy(this.x, this.y, this.faction);
+    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > ABILITY_RANGE) return null;
+    return { x: enemy.x, y: enemy.y, target: enemy };
+  }
+
+  _createSkillProjectile(skill, target) {
+    const dx = target.x - this.x;
+    const dy = target.y - this.y;
+    const [nx, ny] = normalise(dx, dy);
     let proj;
     switch (skill.type) {
       case 'railshot': {
         proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage);
-        proj.owner = this;
         break;
       }
       case 'bioshield': {
         proj = new Projectile(this.x, this.y, 0, 0, this.faction, 'bioshield', 0);
-        proj.owner = this;
         break;
       }
       case 'powerdash': {
         proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage);
-        proj.owner = this;
+        break;
+      }
+      case 'exploit': {
+        proj = new Projectile(this.x, this.y, nx * 360, ny * 360, this.faction, 'exploit', 0, {
+          radius: 7,
+          life: 1.1,
+          effectDuration: 3,
+        });
+        break;
+      }
+      case 'dataspike': {
+        proj = new Projectile(target.x, target.y, 0, 0, this.faction, 'dataspike', 0, {
+          radius: 18,
+          life: 0.7,
+          stationary: true,
+        });
+        proj.targetBase = target.target;
+        break;
+      }
+      case 'systembreach': {
+        proj = new Projectile(target.x, target.y, 0, 0, this.faction, 'systembreach', 0, {
+          radius: 22,
+          life: 0.9,
+          stationary: true,
+        });
+        proj.targetBase = target.target;
         break;
       }
       default: {
         proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage);
-        proj.owner = this;
         break;
       }
     }
+    proj.owner = this;
     return proj;
   }
 
@@ -969,7 +1109,7 @@ export class Particle {
 // ── Projectile (ability effects) ──────────────────────────────────────────────
 
 export class Projectile {
-  constructor(x, y, vx, vy, faction, type, damage) {
+  constructor(x, y, vx, vy, faction, type, damage, options = {}) {
     this.x      = x;
     this.y      = y;
     this.vx     = vx;
@@ -977,16 +1117,21 @@ export class Projectile {
     this.faction = faction;
     this.type   = type;   // 'railshot' | 'bioshield' | 'powerdash'
     this.damage = damage;
-    this.life   = type === 'bioshield' ? 2.5 : 0.8;
+    this.life   = options.life ?? (type === 'bioshield' ? 2.5 : 0.8);
     this.maxLife = this.life;
-    this.radius = type === 'bioshield' ? 50 : type === 'powerdash' ? 12 : 4;
+    this.radius = options.radius ?? (type === 'bioshield' ? 50 : type === 'powerdash' ? 12 : 4);
     this.hit    = false;
     this.owner  = null;   // set by caller
+    this.stationary = !!options.stationary;
+    this.effectDuration = options.effectDuration ?? 0;
+    this.targetBase = options.targetBase ?? null;
   }
 
   update(dt) {
-    this.x    += this.vx * dt;
-    this.y    += this.vy * dt;
+    if (!this.stationary) {
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+    }
     this.life -= dt;
   }
 

@@ -67,7 +67,7 @@ export class HUD {
 
     const legend = document.getElementById('faction-legend');
     if (!legend) return;
-    const jobSummary = '⚔️War ·🔮Mag ·💚Heal ·💨Scout';
+    const jobSummary = '⚔️War ·🔮Mag ·💚Heal ·💨Scout ·💻Hack';
     factions.forEach((f, i) => {
       const row = document.createElement('div');
       row.className = 'legend-row';
@@ -841,6 +841,7 @@ export class HUD {
       mage: '🔮 MAGE',
       healer: '💚 HEALER',
       scout: '💨 SCOUT',
+      hacker: '💻 HACKER',
     };
     this._jobSwitcherEl.style.display = 'flex';
     this._jobSwitcherEl.innerHTML = `

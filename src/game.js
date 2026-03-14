@@ -85,7 +85,7 @@ const MODE_RULES = {
     normalInset: 60,
     rareSpreadRatio: 0.25,
     legendarySpreadRatio: 0.15,
-    jobAssignment: ['warrior', 'mage', 'healer', 'scout', 'warrior'],
+    jobAssignment: ['warrior', 'mage', 'healer', 'scout', 'hacker'],
   },
   quick: {
     playersPerFaction: 2,
@@ -153,12 +153,13 @@ function getModeRules(mode = 'standard') {
   return MODE_RULES[mode] ?? MODE_RULES.standard;
 }
 
-const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout'];
+const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
 const JOB_SWITCH_SHORTCUTS = {
   Digit1: 'warrior',
   Digit2: 'mage',
   Digit3: 'healer',
   Digit4: 'scout',
+  Digit5: 'hacker',
 };
 const TUTORIAL_STEPS = [
   {
@@ -182,7 +183,7 @@ const TUTORIAL_STEPS = [
   {
     id: 'jobs',
     title: 'STEP 4 · JOB ABILITIES',
-    body: 'Swap between all four jobs with the training buttons or 1-4, then press Space once with each job to feel the difference in range and role.',
+    body: 'Swap between all five jobs with the training buttons or 1-5, then press Space once with each job to feel the difference in range and role.',
     highlightIds: ['status-right'],
     showJobSwitcher: true,
   },
@@ -383,6 +384,8 @@ export class Game {
       left: false,
       right: false,
       ability: false,
+      ability2: false,
+      ultimate: false,
       target: false,
       drop: false,
       rally: false,
@@ -390,6 +393,8 @@ export class Game {
       zoomOut: false,
     };
     this._abilityLatch = false;
+    this._ability2Latch = false;
+    this._ultimateLatch = false;
     this._targetLatch = false;
     this._dropLatch = false;
     this._rallyLatch = false;
@@ -445,7 +450,7 @@ export class Game {
   _configureModeState() {
     this.matchTimer = this._isSandboxMode() ? Number.POSITIVE_INFINITY : this.config.matchDuration;
     this.trainingMessage = this._isPracticeMode()
-      ? 'PRACTICE SANDBOX — Switch jobs with 1-4 and test abilities on the dummy agents.'
+      ? 'PRACTICE SANDBOX — Switch jobs with 1-5 and test abilities on the dummy agents.'
       : '';
     this.practiceState = this._isPracticeMode() ? { lastSwitchedJob: null } : null;
     this._tutorialMetrics = {
@@ -573,6 +578,8 @@ export class Game {
       if (code === 'KeyA' || code === 'ArrowLeft') this.input.left = down;
       if (code === 'KeyD' || code === 'ArrowRight') this.input.right = down;
       if (code === 'Space') this.input.ability = down;
+      if (code === 'KeyF') this.input.ability2 = down;
+      if (code === 'KeyR') this.input.ultimate = down;
       if (code === 'Tab') this.input.target = down;
       if (code === 'KeyE') this.input.drop = down;
       if (code === 'KeyQ') this.input.rally = down;
@@ -583,7 +590,7 @@ export class Game {
         code === 'KeyS' || code === 'ArrowDown' ||
         code === 'KeyA' || code === 'ArrowLeft' ||
         code === 'KeyD' || code === 'ArrowRight' ||
-        code === 'Space' || code === 'Tab' ||
+        code === 'Space' || code === 'KeyF' || code === 'KeyR' || code === 'Tab' ||
         code === 'KeyE' || code === 'KeyQ' ||
         code === 'Equal' || code === 'NumpadAdd' ||
         code === 'Minus' || code === 'NumpadSubtract'
@@ -690,7 +697,11 @@ export class Game {
     this.input.left = false;
     this.input.right = false;
     this.input.ability = false;
+    this.input.ability2 = false;
+    this.input.ultimate = false;
     this._abilityLatch = false;
+    this._ability2Latch = false;
+    this._ultimateLatch = false;
   }
 
   _applySettings() {
@@ -740,6 +751,8 @@ export class Game {
       player.cooldown = 0;
       player.cooldown2 = 0;
       player.ultCooldown = 0;
+      player.abilitySealTimer = 0;
+      player.hackLinkTimer = 0;
       player.carrying = [];
       player.alive = true;
       player.respawnTimer = 0;
@@ -787,6 +800,8 @@ export class Game {
         this.trilocks[0].captureFaction = null;
         this.trilocks[0].captureProgress = 0;
         this.trilocks[0].level = 0;
+        this.trilocks[0].capturePausedTimer = 0;
+        this.trilocks[0].scoreDisabledTimer = 0;
         this.trilocks[0].x = cx;
         this.trilocks[0].y = cy - 135;
       }
@@ -824,6 +839,8 @@ export class Game {
       player.cooldown = 0;
       player.cooldown2 = 0;
       player.ultCooldown = 0;
+      player.abilitySealTimer = 0;
+      player.hackLinkTimer = 0;
       player.carrying = [];
       player.health = player.baseMaxHealth;
       player.maxHealth = player.baseMaxHealth;
@@ -846,6 +863,8 @@ export class Game {
       base.captureProgress = 0;
       base.level = 0;
       base.crystalsStored = 0;
+      base.capturePausedTimer = 0;
+      base.scoreDisabledTimer = 0;
       base.x = cx;
       base.y = cy - 120;
     }
@@ -1107,7 +1126,9 @@ export class Game {
         }
         if (!regenBlocked) {
           const regenMult = this.factionBuffs[player.faction]?.regenMult ?? 1;
-          player.energy = Math.min(100, player.energy + 8 * regenMult * dt);
+          const baseRegen = player.job === 'hacker' ? 12 : 8;
+          const hackMult = player.hackLinkTimer > 0 ? 2 : 1;
+          player.energy = Math.min(100, player.energy + baseRegen * regenMult * hackMult * dt);
         }
       }
       if (player.alive && player.passiveState?.bioRegenActive) {
@@ -1155,6 +1176,36 @@ export class Game {
         } else if (!this.input.ability) {
           this._abilityLatch = false;
         }
+        if (this.input.ability2 && !this._ability2Latch) {
+          this._ability2Latch = true;
+          const proj = player.trySecondaryAbility?.(this);
+          if (proj) {
+            this.projectiles.push(proj);
+            this.audio.playAbility(player.faction, player.job);
+            this.events.push({
+              text: `${player.faction.toUpperCase()} fired ${player.ability2Name.toUpperCase()}`,
+              faction: player.faction,
+              ttl: 2,
+            });
+          }
+        } else if (!this.input.ability2) {
+          this._ability2Latch = false;
+        }
+        if (this.input.ultimate && !this._ultimateLatch) {
+          this._ultimateLatch = true;
+          const proj = player.tryUltimate?.(this);
+          if (proj) {
+            this.projectiles.push(proj);
+            this.audio.playAbility(player.faction, player.job);
+            this.events.push({
+              text: `${player.faction.toUpperCase()} fired ${player.ultName.toUpperCase()}`,
+              faction: player.faction,
+              ttl: 2,
+            });
+          }
+        } else if (!this.input.ultimate) {
+          this._ultimateLatch = false;
+        }
         continue;
       }
       if (player.alive && Math.random() < AI_ABILITY_CHANCE * (player.abilityDifficultyMult ?? 1)) {
@@ -1164,6 +1215,30 @@ export class Game {
           this.audio.playAbility(player.faction, player.job);
           this.events.push({
             text: `${player.faction.toUpperCase()} fired ${player.abilityName.toUpperCase()}`,
+            faction: player.faction,
+            ttl: 2,
+          });
+        }
+      }
+      if (player.job === 'hacker' && player.alive && Math.random() < AI_ABILITY_CHANCE * 0.65 * (player.abilityDifficultyMult ?? 1)) {
+        const proj = player.trySecondaryAbility?.(this);
+        if (proj) {
+          this.projectiles.push(proj);
+          this.audio.playAbility(player.faction, player.job);
+          this.events.push({
+            text: `${player.faction.toUpperCase()} fired ${player.ability2Name.toUpperCase()}`,
+            faction: player.faction,
+            ttl: 2,
+          });
+        }
+      }
+      if (player.job === 'hacker' && player.alive && Math.random() < AI_ABILITY_CHANCE * 0.28 * (player.abilityDifficultyMult ?? 1)) {
+        const proj = player.tryUltimate?.(this);
+        if (proj) {
+          this.projectiles.push(proj);
+          this.audio.playAbility(player.faction, player.job);
+          this.events.push({
+            text: `${player.faction.toUpperCase()} fired ${player.ultName.toUpperCase()}`,
             faction: player.faction,
             ttl: 2,
           });
@@ -1315,7 +1390,9 @@ export class Game {
       resetCooldowns: true,
       preserveHealthRatio: false,
     });
-    this.trainingMessage = `${JOBS[jobId].label.toUpperCase()} LINKED — Press Space to test ${this.localPlayer.abilityName.toUpperCase()}.`;
+    this.trainingMessage = jobId === 'hacker'
+      ? `${JOBS[jobId].label.toUpperCase()} LINKED — Space: ${this.localPlayer.abilityName.toUpperCase()} / F: ${this.localPlayer.ability2Name.toUpperCase()} / R: ${this.localPlayer.ultName.toUpperCase()}.`
+      : `${JOBS[jobId].label.toUpperCase()} LINKED — Press Space to test ${this.localPlayer.abilityName.toUpperCase()}.`;
     if (this.practiceState) this.practiceState.lastSwitchedJob = jobId;
   }
 
@@ -1406,7 +1483,7 @@ export class Game {
         visible: true,
         mode: 'practice',
         title: 'PRACTICE MODE · SANDBOX',
-        body: this.trainingMessage || 'Switch jobs freely with the buttons or 1-4, then attack the dummy agents with Space. Respawns are unlimited and the match never times out.',
+        body: this.trainingMessage || 'Switch jobs freely with the buttons or 1-5, then attack the dummy agents with Space. Respawns are unlimited and the match never times out.',
         highlightIds: ['status-right'],
         showJobSwitcher: true,
       };
@@ -1463,6 +1540,8 @@ export class Game {
         player.cooldown = 0;
         player.cooldown2 = 0;
         player.ultCooldown = 0;
+        player.abilitySealTimer = 0;
+        player.hackLinkTimer = 0;
         const point = this.getRespawnPoint(player);
         if (point) {
           player.x = point.x;
@@ -1478,6 +1557,10 @@ export class Game {
     }
 
     if (player.cooldown > 0) player.cooldown = Math.max(0, player.cooldown - dt);
+    if (player.cooldown2 > 0) player.cooldown2 = Math.max(0, player.cooldown2 - dt);
+    if (player.ultCooldown > 0) player.ultCooldown = Math.max(0, player.ultCooldown - dt);
+    if (player.abilitySealTimer > 0) player.abilitySealTimer = Math.max(0, player.abilitySealTimer - dt);
+    if (player.hackLinkTimer > 0) player.hackLinkTimer = Math.max(0, player.hackLinkTimer - dt);
 
     const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
@@ -1575,12 +1658,51 @@ export class Game {
         continue;
       }
 
+      if (proj.type === 'dataspike' && proj.targetBase) {
+        const dx = proj.targetBase.x - proj.x;
+        const dy = proj.targetBase.y - proj.y;
+        if (Math.sqrt(dx * dx + dy * dy) < BASE_RADIUS * 0.9 + proj.radius) {
+          proj.targetBase.capturePausedTimer = Math.max(proj.targetBase.capturePausedTimer ?? 0, 4);
+          this.sparks.push(...Particle.ring(proj.targetBase.x, proj.targetBase.y, FACTIONS[proj.faction].color, BASE_RADIUS * 0.75, {
+            life: 0.8,
+            growth: 65,
+            lineWidth: 3,
+          }));
+          proj.hit = true;
+        }
+        continue;
+      }
+
+      if (proj.type === 'systembreach' && proj.targetBase) {
+        proj.targetBase.scoreDisabledTimer = Math.max(proj.targetBase.scoreDisabledTimer ?? 0, 10);
+        this.sparks.push(...Particle.ring(proj.targetBase.x, proj.targetBase.y, FACTIONS[proj.faction].color, BASE_RADIUS * 0.95, {
+          life: 0.95,
+          growth: 80,
+          lineWidth: 4,
+        }));
+        proj.hit = true;
+        continue;
+      }
+
       // Railshot & Power Dash — hit enemies
       for (const p of this.players) {
         if (!p.alive || p.faction === proj.faction) continue;
         if (this._isAlly(proj.faction, p.faction)) continue;   // skip allied faction
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
+          if (proj.type === 'exploit') {
+            p.abilitySealTimer = Math.max(p.abilitySealTimer ?? 0, proj.effectDuration || 3);
+            if (proj.owner) {
+              proj.owner.hackLinkTimer = Math.max(proj.owner.hackLinkTimer ?? 0, proj.effectDuration || 3);
+            }
+            this.sparks.push(...Particle.ring(p.x, p.y, FACTIONS[proj.faction].color, p.radius + 10, {
+              life: 0.7,
+              growth: 45,
+              lineWidth: 2,
+            }));
+            proj.hit = true;
+            break;
+          }
           this._registerDamage(p, proj.faction);
           proj.owner?.markCombat(this.elapsed);
           p.markCombat(this.elapsed);
@@ -1941,6 +2063,10 @@ export class Game {
       player.respawnTimer = 0;
       player.carrying = [];
       player.cooldown = Math.random() * player.abilityMax;
+      player.cooldown2 = 0;
+      player.ultCooldown = 0;
+      player.abilitySealTimer = 0;
+      player.hackLinkTimer = 0;
       player.trailPoints = [];
       player.lastCombatTime = -Infinity;
       player.passiveState.deliveryBonusActive = false;
@@ -1955,6 +2081,7 @@ export class Game {
     // Reset home bases
     for (const base of Object.values(this.bases)) {
       base.crystalsStored = 0;
+      base.scoreDisabledTimer = 0;
     }
 
     // Reset TriLocks to neutral
@@ -1964,6 +2091,8 @@ export class Game {
       tl.captureProgress = 0;
       tl.level = 0;
       tl.crystalsStored = 0;
+      tl.capturePausedTimer = 0;
+      tl.scoreDisabledTimer = 0;
     }
 
     // Reset jewels (value-tiered)
@@ -2039,6 +2168,31 @@ export class Game {
       if (tl.faction !== faction) continue;
       const d = Math.sqrt((tl.x - x) ** 2 + (tl.y - y) ** 2);
       if (d < bestD) { bestD = d; best = tl; }
+    }
+    return best;
+  }
+
+  _nearestHackableTriLock(x, y, faction) {
+    let best = null, bestD = Infinity;
+    for (const tl of this.trilocks) {
+      if (tl.faction === faction) continue;
+      const d = Math.sqrt((tl.x - x) ** 2 + (tl.y - y) ** 2);
+      if (d < bestD) { bestD = d; best = tl; }
+    }
+    return best;
+  }
+
+  _nearestEnemyBaseTarget(x, y, faction) {
+    let best = null, bestD = Infinity;
+    const candidates = [
+      ...Object.values(this.bases),
+      ...this.trilocks.filter(tl => tl.faction && tl.faction !== faction),
+    ];
+    for (const base of candidates) {
+      if (!base?.faction || base.faction === faction) continue;
+      if (this._isAlly(faction, base.faction)) continue;
+      const d = Math.sqrt((base.x - x) ** 2 + (base.y - y) ** 2);
+      if (d < bestD) { bestD = d; best = base; }
     }
     return best;
   }
@@ -2194,6 +2348,8 @@ export class Game {
       this.focusedEnemy = null;
       this.rallySignal = null;
       this._abilityLatch = false;
+      this._ability2Latch = false;
+      this._ultimateLatch = false;
       this._targetLatch = this.input.target;
       this._dropLatch = this.input.drop;
       this._rallyLatch = this.input.rally;
@@ -2495,6 +2651,7 @@ export class Game {
         level: base.level ?? 0,
         highValue: !!base.highValue,
         highValueMultiplier: base.highValueMultiplier ?? 1,
+        scoreDisabledTimer: round(base.scoreDisabledTimer ?? 0),
       }]),
       ),
       trilocks: this.trilocks.map(tl => ({
@@ -2509,6 +2666,8 @@ export class Game {
         level: tl.level ?? 0,
         highValue: !!tl.highValue,
         highValueMultiplier: tl.highValueMultiplier ?? 1,
+        capturePausedTimer: round(tl.capturePausedTimer ?? 0),
+        scoreDisabledTimer: round(tl.scoreDisabledTimer ?? 0),
       })),
       players: this.players.map(player => ({
         faction: player.faction,
@@ -2525,6 +2684,8 @@ export class Game {
         cooldown: round(player.cooldown ?? 0),
         cooldown2: round(player.cooldown2 ?? 0),
         ultCooldown: round(player.ultCooldown ?? 0),
+        abilitySealTimer: round(player.abilitySealTimer ?? 0),
+        hackLinkTimer: round(player.hackLinkTimer ?? 0),
         state: player.state,
         role: player.role,
         target: player.target ? { x: round(player.target.x), y: round(player.target.y) } : null,
@@ -2625,6 +2786,8 @@ export class Game {
       player.cooldown = snapshot.cooldown;
       player.cooldown2 = snapshot.cooldown2;
       player.ultCooldown = snapshot.ultCooldown;
+      player.abilitySealTimer = snapshot.abilitySealTimer ?? 0;
+      player.hackLinkTimer = snapshot.hackLinkTimer ?? 0;
       player.state = snapshot.state;
       player.role = snapshot.role;
       player.target = snapshot.target ? { ...snapshot.target } : null;
@@ -2691,6 +2854,8 @@ export class Game {
     this.focusedEnemy = null;
     this.rallySignal = null;
     this._abilityLatch = false;
+    this._ability2Latch = false;
+    this._ultimateLatch = false;
     if (this.spectatorMode) {
       this.spectatorCameraMode = 'overhead';
       this._cycleSpectatorTarget(0);
@@ -2967,7 +3132,9 @@ export class Game {
       }
 
       const prevFaction = tl.faction;
-      tl.tryCapture(counts, dt);
+      if ((tl.capturePausedTimer ?? 0) <= 0) {
+        tl.tryCapture(counts, dt);
+      }
 
       // Emit event on faction change
       if (tl.faction && tl.faction !== prevFaction) {

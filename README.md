@@ -22,12 +22,12 @@ Game (world state, update loop)
  │
  ├── Player (Agent)
  │    ├─ faction: string            ← blue / green / red
- │    ├─ job: string                ← warrior / mage / healer / scout
+ │    ├─ job: string                ← warrior / mage / healer / scout / hacker
  │    ├─ carrying: Jewel[]          ← up to 5 jewels
- │    ├─ skills[0]: primary         ← Power Slash / Railshot / Bio Shield / Quick Dash
- │    ├─ skills[1]: secondary       ← War Cry / Ice Wall / Purify / Smoke Bomb
- │    ├─ ultimate                   ← Blade Storm / Meteor Strike / Sanctuary / Shadow Step
- │    ├─ role: string               ← collector / fighter / defender (AI)
+ │    ├─ skills[0]: primary         ← Power Slash / Railshot / Bio Shield / Quick Dash / Exploit
+ │    ├─ skills[1]: secondary       ← War Cry / Ice Wall / Purify / Smoke Bomb / Data Spike
+ │    ├─ ultimate                   ← Blade Storm / Meteor Strike / Sanctuary / Shadow Step / System Breach
+ │    ├─ role: string               ← collector / fighter / controller / defender (AI)
  │    ├─ tryAbility(world)          ← fire primary skill → Projectile
  │    └─ dropAllJewels(world)       ← death penalty
  │
@@ -76,7 +76,7 @@ Game (world state, update loop)
 
 ## Job System
 
-Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Scout, Warrior):
+Each team fields 5 agents across 5 jobs (index 0–4: Warrior, Mage, Healer, Scout, Hacker):
 
 | Job | Emoji | Speed | HP | Skills | Ultimate |
 |-----|-------|-------|----|--------|----------|
@@ -84,6 +84,7 @@ Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Sco
 | **Mage** | 🔮 | 55 | 80 | Railshot (35 dmg), Ice Wall (zone) | Meteor Strike (50 dmg) |
 | **Healer** | 💚 | 60 | 100 | Bio Shield (heal aura), Purify (cleanse) | Sanctuary (mass heal) |
 | **Scout** | 💨 | 95 | 85 | Quick Dash (20 dmg), Smoke Bomb (stealth) | Shadow Step (30 dmg) |
+| **Hacker** | 💻 | 66 | 76 | Exploit (seal 3s), Data Spike (pause capture) | System Breach (disable scoring 10s) |
 
 ---
 
@@ -221,7 +222,9 @@ Controls (browser preview):
 
 - Choose your starting faction on the launch screen before deploying.
 - `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
-- `Space`: activate job ability (Warrior: Power Slash) when charged
+- `Space`: activate your primary job ability
+- `F`: activate your secondary job ability
+- `R`: activate your ultimate job ability
 - `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT)
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs
@@ -245,8 +248,8 @@ Each faction's 5 agents are assigned specialised roles based on their job class:
 | Job | Role | Behaviour |
 |-----|------|-----------|
 | **Scout / Healer** | Collector | Jewel retrieval specialist — strongly prefers picking up jewels and delivering them. |
-| **Warrior (idx 0) / Mage** | Fighter | Enemy elimination specialist — seeks out and attacks enemy agents. Biased toward the leading team (hate control). |
-| **Warrior (idx 4)** | Defender | Base patrol guard — stays within patrol radius, engages intruders, grabs nearby jewels. |
+| **Warrior / Mage** | Fighter | Enemy elimination specialist — seeks out and attacks enemy agents. Biased toward the leading team (hate control). |
+| **Hacker** | Controller | Base-control specialist — prioritises TriLocks, disrupts capture flow, and pressures scoring bases with hacks. |
 
 ---
 
