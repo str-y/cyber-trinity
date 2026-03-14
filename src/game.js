@@ -26,6 +26,12 @@ const ASSIST_WINDOW = 5;
 const MATCH_DURATION = 300;            // 5-minute match (seconds)
 const BONUS_LEGENDARY_CHANCE = 0.3;    // probability of legendary (vs rare) for bonus spawns
 const AURA_EMISSION_INTERVAL = 0.14;
+const REPLAY_DEFAULT_ZOOM = 1.2;
+const REPLAY_MIN_ZOOM = 1;
+const REPLAY_MAX_ZOOM = 2.5;
+const REPLAY_ZOOM_RATE = 1.2;
+const REPLAY_PAN_SPEED = 320;
+const REPLAY_TRAIL_HISTORY_LENGTH = 8;
 
 // ── Alliance system ──────────────────────────────────────────────────────────
 const ALLIANCE_FORM_THRESHOLD    = 20; // score gap to trigger temporary alliance
@@ -417,7 +423,8 @@ export class Game {
       return;
     }
     if (this.matchEnded) {
-      this.victoryTimer = Math.max(0, this.victoryTimer - dt);
+      this.victoryTimer -= dt;
+      if (!this.replay.hasReplay && this.victoryTimer <= 0) this._restart();
       return;
     }
     this.elapsed += dt;
@@ -1164,17 +1171,17 @@ export class Game {
   resetReplayCamera() {
     this.camera.x = this.width / 2;
     this.camera.y = this.height / 2;
-    this.camera.zoom = 1.2;
+    this.camera.zoom = REPLAY_DEFAULT_ZOOM;
   }
 
   _updateReplayCamera(dt) {
-    const panSpeed = 320 / this.camera.zoom;
+    const panSpeed = REPLAY_PAN_SPEED / this.camera.zoom;
     const dx = (this.input.right ? 1 : 0) - (this.input.left ? 1 : 0);
     const dy = (this.input.down ? 1 : 0) - (this.input.up ? 1 : 0);
     this.camera.x += dx * panSpeed * dt;
     this.camera.y += dy * panSpeed * dt;
-    if (this.input.zoomIn) this.camera.zoom = Math.min(2.5, this.camera.zoom + dt * 1.2);
-    if (this.input.zoomOut) this.camera.zoom = Math.max(1, this.camera.zoom - dt * 1.2);
+    if (this.input.zoomIn) this.camera.zoom = Math.min(REPLAY_MAX_ZOOM, this.camera.zoom + dt * REPLAY_ZOOM_RATE);
+    if (this.input.zoomOut) this.camera.zoom = Math.max(REPLAY_MIN_ZOOM, this.camera.zoom - dt * REPLAY_ZOOM_RATE);
 
     const halfW = this.width / (2 * this.camera.zoom);
     const halfH = this.height / (2 * this.camera.zoom);
@@ -1280,7 +1287,7 @@ export class Game {
         state: player.state,
         role: player.role,
         target: player.target ? { x: round(player.target.x), y: round(player.target.y) } : null,
-        trailPoints: player.trailPoints.slice(-8).map(point => ({
+        trailPoints: player.trailPoints.slice(-REPLAY_TRAIL_HISTORY_LENGTH).map(point => ({
           x: round(point.x),
           y: round(point.y),
           a: round(point.a ?? 1, 3),

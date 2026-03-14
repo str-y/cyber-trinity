@@ -273,7 +273,7 @@ export class HUD {
     restart.addEventListener('click', () => world.restartLiveMatch());
     exit.addEventListener('click', () => world.exitReplayPlayback());
     timeline.addEventListener('input', event => {
-      world.startReplayPlayback();
+      if (!world.replay?.isActive) world.startReplayPlayback();
       world.setReplayTime(event.target.value);
     });
     speed.addEventListener('change', event => world.setReplaySpeed(event.target.value));
