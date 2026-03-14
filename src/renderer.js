@@ -4,7 +4,7 @@
  * Draws bases, network links, players, crystals, particles, rain, and UI overlays.
  */
 
-import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE } from './entities.js';
+import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -101,6 +101,8 @@ export class Renderer {
       if (player.alive) this._drawTrail(player);
     }
 
+    if (world._isSandboxMode?.()) this._drawPracticeRange(world);
+
     // ── Players ────────────────────────────────────────────────────────────
     for (const player of world.players) {
       this._drawPlayer(player);
@@ -120,6 +122,7 @@ export class Renderer {
 
     // ── Feature completion visual pulse ────────────────────────────────────
     this._drawFeaturePulse(world);
+    this._drawDamageNumbers(world.damageNumbers);
     ctx.restore();
 
     // ── Match timer overlay ────────────────────────────────────────────────
@@ -560,6 +563,11 @@ export class Renderer {
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
     ctx.fillText(itemLabel, 0, PLAYER_RADIUS + 16);
+    if (player.isDummy) {
+      ctx.fillStyle = 'rgba(255,255,255,0.72)';
+      ctx.font = 'bold 7px "Courier New", monospace';
+      ctx.fillText('DUMMY', 0, -PLAYER_RADIUS - 8);
+    }
 
     // Jewel carry indicator
     if (player.carrying && player.carrying.length > 0) {
@@ -659,6 +667,44 @@ export class Renderer {
     ctx.restore();
   }
 
+  _drawPracticeRange(world) {
+    const local = world.localPlayer;
+    if (!local?.alive) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(160,212,255,0.28)';
+    ctx.fillStyle = 'rgba(160,212,255,0.06)';
+    ctx.setLineDash([10, 8]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(local.x, local.y, ABILITY_RANGE, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(216,236,255,0.8)';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${local.abilityName.toUpperCase()} RANGE`, local.x, local.y - ABILITY_RANGE - 10);
+    ctx.restore();
+  }
+
+  _drawDamageNumbers(numbers) {
+    if (!numbers?.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 14px "Courier New", monospace';
+    for (const number of numbers) {
+      const alpha = Math.max(0, Math.min(1, number.ttl / 0.9));
+      ctx.fillStyle = withAlpha(number.color ?? '#ffd966', 0.25 + alpha * 0.75);
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = number.color ?? '#ffd966';
+      ctx.fillText(String(number.value), number.x, number.y);
+    }
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
   _drawCommandIndicators(world) {
     const ctx = this.ctx;
     const local = world.localPlayer;
@@ -718,45 +764,6 @@ export class Renderer {
       const arrowY = local.y + ny * Math.min(54, len * 0.45);
       const targetColor = FACTIONS[target.faction].color;
       const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
-
-      ctx.save();
-      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 10]);
-      ctx.beginPath();
-      ctx.moveTo(local.x, local.y);
-      ctx.lineTo(target.x, target.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.translate(arrowX, arrowY);
-      ctx.rotate(Math.atan2(dy, dx));
-      ctx.fillStyle = withAlpha(targetColor, 0.9);
-      ctx.shadowBlur = 14;
-      ctx.shadowColor = targetColor;
-      ctx.beginPath();
-      ctx.moveTo(14, 0);
-      ctx.lineTo(-6, -8);
-      ctx.lineTo(-2, 0);
-      ctx.lineTo(-6, 8);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-
-      ctx.save();
-      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
-      ctx.lineWidth = 2;
-      ctx.shadowBlur = 16;
-      ctx.shadowColor = targetColor;
-      ctx.beginPath();
-      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = withAlpha(targetColor, 0.95);
-      ctx.font = 'bold 9px "Courier New", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
-      ctx.restore();
-    }
 
       ctx.save();
       ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
@@ -1198,10 +1205,10 @@ export class Renderer {
   // ── Match timer (centre top, rendered on canvas for visibility) ────────
 
   _drawMatchTimer(world, W, H) {
-    const t = Math.max(0, world.matchTimer ?? 0);
-    const mins = Math.floor(t / 60);
-    const secs = Math.floor(t % 60);
-    const text = `${mins}:${secs.toString().padStart(2, '0')}`;
+    const text = Number.isFinite(world.matchTimer ?? 0)
+      ? `${Math.floor(Math.max(0, world.matchTimer ?? 0) / 60)}:${Math.floor(Math.max(0, world.matchTimer ?? 0) % 60).toString().padStart(2, '0')}`
+      : (world.config?.gameMode === 'tutorial' ? 'TUTORIAL' : 'FREEPLAY');
+    const t = Number.isFinite(world.matchTimer ?? 0) ? Math.max(0, world.matchTimer ?? 0) : 999;
 
     const ctx = this.ctx;
     ctx.save();

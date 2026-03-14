@@ -23,6 +23,8 @@ export class HUD {
       chaosZones: true,
     };
     this._selectedPinType = 'gather';
+    this._highlightedIds = [];
+    this._modeControlsBound = false;
     this._init();
   }
 
@@ -259,6 +261,16 @@ export class HUD {
       `;
       this._scoreboardEl = scoreboard;
     }
+
+    const modeGuide = document.createElement('div');
+    modeGuide.id = 'mode-guide';
+    hud.appendChild(modeGuide);
+    this._modeGuideEl = modeGuide;
+
+    const jobSwitcher = document.createElement('div');
+    jobSwitcher.id = 'mode-job-switcher';
+    hud.appendChild(jobSwitcher);
+    this._jobSwitcherEl = jobSwitcher;
   }
 
   _barRow(icon, label, id, numText, pct, type) {
@@ -278,6 +290,7 @@ export class HUD {
 
   update(world) {
     this._bindReplayControls(world);
+    this._bindModeControls(world);
     // Scores — highlight leading faction
     const leadFaction = world._leadingFaction?.();
     for (const [f, el] of Object.entries(this._scoreEls)) {
@@ -296,12 +309,17 @@ export class HUD {
     // Match timer
     const timerVal = document.getElementById('timer-value');
     if (timerVal) {
-      const t = Math.max(0, world.matchTimer ?? 0);
-      const mins = Math.floor(t / 60);
-      const secs = Math.floor(t % 60);
-      timerVal.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-      // Urgent colour when <30s
-      timerVal.style.color = t < 30 ? '#ff4444' : '#a0d4ff';
+      if (!Number.isFinite(world.matchTimer ?? 0)) {
+        timerVal.textContent = world.config?.gameMode === 'tutorial' ? 'TUTORIAL' : 'FREEPLAY';
+        timerVal.style.color = '#a0d4ff';
+      } else {
+        const t = Math.max(0, world.matchTimer ?? 0);
+        const mins = Math.floor(t / 60);
+        const secs = Math.floor(t % 60);
+        timerVal.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+        // Urgent colour when <30s
+        timerVal.style.color = t < 30 ? '#ff4444' : '#a0d4ff';
+      }
     }
 
     const statusLeft = document.getElementById('status-left');
@@ -372,6 +390,9 @@ export class HUD {
     this._updateChaosEvent(world);
     this._updateScoreboard(world);
     this._updateMinimapStatus(world);
+    this._updateGuide(world);
+    const featureSpec = document.getElementById('feature-spec');
+    if (featureSpec) featureSpec.style.display = world._isSandboxMode?.() ? 'none' : 'flex';
   }
 
   _bindReplayControls(world) {
@@ -394,6 +415,24 @@ export class HUD {
     });
     speed.addEventListener('change', event => world.setReplaySpeed(event.target.value));
     this._replayControlsBound = true;
+  }
+
+  _bindModeControls(world) {
+    if (this._modeControlsBound || !this._modeGuideEl || !this._jobSwitcherEl) return;
+    this._modeGuideEl.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-guide-action]');
+      if (!(button instanceof HTMLButtonElement)) return;
+      const action = button.dataset.guideAction;
+      if (action === 'skip') world.skipTutorial?.();
+      else if (action === 'advance') world.advanceTutorial?.();
+      else if (action === 'start') world.startMainMatchFromTutorial?.();
+    });
+    this._jobSwitcherEl.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-job]');
+      if (!(button instanceof HTMLButtonElement)) return;
+      world.switchLocalJob?.(button.dataset.job);
+    });
+    this._modeControlsBound = true;
   }
 
   _setBar(id, value, max, numText) {
@@ -744,5 +783,74 @@ export class HUD {
 
   getSelectedPinType() {
     return this._selectedPinType;
+  }
+
+  _updateGuide(world) {
+    if (!this._modeGuideEl || !this._jobSwitcherEl) return;
+    const guide = world.getGuideState?.() ?? null;
+
+    for (const id of this._highlightedIds) {
+      document.getElementById(id)?.classList.remove('guide-highlight');
+    }
+    this._highlightedIds = guide?.highlightIds ?? [];
+    for (const id of this._highlightedIds) {
+      document.getElementById(id)?.classList.add('guide-highlight');
+    }
+
+    if (!guide?.visible) {
+      this._modeGuideEl.style.display = 'none';
+      this._jobSwitcherEl.style.display = 'none';
+      return;
+    }
+
+    this._modeGuideEl.style.display = 'flex';
+    const showAdvance = !!guide.canAdvance;
+    const actionHtml = guide.mode === 'tutorial'
+      ? `
+        <div class="mode-guide-actions">
+          ${guide.complete
+            ? '<button type="button" class="mode-guide-btn primary" data-guide-action="start">START STANDARD MATCH</button>'
+            : showAdvance
+              ? '<button type="button" class="mode-guide-btn primary" data-guide-action="advance">NEXT STEP</button>'
+              : ''}
+          ${guide.complete ? '' : '<button type="button" class="mode-guide-btn" data-guide-action="skip">SKIP TUTORIAL</button>'}
+        </div>
+      `
+      : '';
+    const completeBody = guide.complete
+      ? 'Tutorial complete. Start a full standard match with your current faction selection whenever you are ready.'
+      : guide.body;
+    this._modeGuideEl.innerHTML = `
+      <div class="mode-guide-kicker">${guide.mode.toUpperCase()}</div>
+      <div class="mode-guide-title">${guide.title}</div>
+      ${guide.stepIndex ? `<div class="mode-guide-step">STEP ${guide.stepIndex} / ${guide.stepCount}</div>` : ''}
+      <div class="mode-guide-body">${completeBody}</div>
+      ${guide.progress ? `<div class="mode-guide-progress">${guide.progress}</div>` : ''}
+      ${actionHtml}
+    `;
+
+    if (!guide.showJobSwitcher) {
+      this._jobSwitcherEl.style.display = 'none';
+      return;
+    }
+
+    const currentJob = world.localPlayer?.job ?? 'warrior';
+    const jobLabels = {
+      warrior: '⚔️ WARRIOR',
+      mage: '🔮 MAGE',
+      healer: '💚 HEALER',
+      scout: '💨 SCOUT',
+    };
+    this._jobSwitcherEl.style.display = 'flex';
+    this._jobSwitcherEl.innerHTML = `
+      <div class="mode-job-title">JOB LINKER</div>
+      <div class="mode-job-buttons">
+        ${Object.entries(jobLabels).map(([job, label], index) => `
+          <button type="button" class="mode-job-btn${currentJob === job ? ' active' : ''}" data-job="${job}">
+            <span>${label}</span><span class="mode-job-shortcut">${index + 1}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
   }
 }
