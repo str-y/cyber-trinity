@@ -73,6 +73,10 @@ export class Renderer {
       }
     }
 
+    if (world.nexusGuardian?.state === 'active') {
+      this._drawNexusGuardian(world.nexusGuardian);
+    }
+
     // ── Jewels (value-tiered) ──────────────────────────────────────────────
     for (const crystal of world.crystals) {
       if (!crystal.delivered) this._drawCrystal(crystal);
@@ -1024,6 +1028,76 @@ export class Renderer {
     ctx.restore();
   }
 
+  _drawNexusGuardian(guardian) {
+    const ctx = this.ctx;
+    const pulse = 0.5 + 0.25 * Math.sin(this.time * 2.8);
+    const R = guardian.radius;
+
+    ctx.save();
+
+    const glow = ctx.createRadialGradient(guardian.x, guardian.y, R * 0.2, guardian.x, guardian.y, R * 2.7);
+    glow.addColorStop(0, `rgba(125,230,255,${0.28 + pulse * 0.18})`);
+    glow.addColorStop(0.5, 'rgba(110,190,255,0.14)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, R * 2.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(125,230,255,${0.35 + pulse * 0.25})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -this.time * 30;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, guardian.arenaRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(110,180,220,0.18)';
+    ctx.strokeStyle = 'rgba(160,245,255,0.75)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(guardian.x, guardian.y - R);
+    ctx.lineTo(guardian.x + R * 0.7, guardian.y - R * 0.15);
+    ctx.lineTo(guardian.x + R * 0.55, guardian.y + R * 0.75);
+    ctx.lineTo(guardian.x - R * 0.55, guardian.y + R * 0.75);
+    ctx.lineTo(guardian.x - R * 0.7, guardian.y - R * 0.15);
+    ctx.closePath();
+    ctx.shadowBlur = 24;
+    ctx.shadowColor = '#7de6ff';
+    ctx.fill();
+    ctx.stroke();
+
+    const core = ctx.createRadialGradient(guardian.x, guardian.y, R * 0.05, guardian.x, guardian.y, R * 0.55);
+    core.addColorStop(0, 'rgba(255,255,255,0.95)');
+    core.addColorStop(0.4, `rgba(160,250,255,${0.85 + pulse * 0.1})`);
+    core.addColorStop(1, 'rgba(20,80,120,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, R * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+
+    const hpPct = Math.max(0, guardian.health / Math.max(1, guardian.maxHealth));
+    const barW = 150;
+    const barH = 9;
+    const barX = guardian.x - barW / 2;
+    const barY = guardian.y - guardian.arenaRadius - 24;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0,8,18,0.8)';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.strokeStyle = 'rgba(125,230,255,0.55)';
+    ctx.strokeRect(barX, barY, barW, barH);
+    ctx.fillStyle = 'rgba(125,230,255,0.9)';
+    ctx.fillRect(barX + 1, barY + 1, (barW - 2) * hpPct, barH - 2);
+
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#c6f8ff';
+    ctx.fillText('NEXUS GUARDIAN', guardian.x, barY - 8);
+
+    ctx.restore();
+  }
+
   // ── Match timer (centre top, rendered on canvas for visibility) ────────
 
   _drawMatchTimer(world, W, H) {
@@ -1156,6 +1230,24 @@ export class Renderer {
         ctx.arc(mx(tl.x), my(tl.y), 3, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+
+    if (world.nexusGuardian?.state === 'active') {
+      const guardian = world.nexusGuardian;
+      const px = mx(guardian.x);
+      const py = my(guardian.y);
+      const pulse = 0.45 + 0.35 * Math.sin(this.time * 8);
+      ctx.strokeStyle = `rgba(160,250,255,${0.55 + pulse * 0.3})`;
+      ctx.fillStyle = 'rgba(160,250,255,0.95)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(px, py - 5);
+      ctx.lineTo(px + 5, py);
+      ctx.lineTo(px, py + 5);
+      ctx.lineTo(px - 5, py);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fill();
     }
 
     // ── Crystals (white, blinking) ────────────────────────────────────────

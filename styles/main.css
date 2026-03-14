@@ -618,6 +618,7 @@ html, body {
 
 .feature-status-pending { color: #4aa8ff !important; }
 .feature-status-completed { color: #50ff78 !important; }
+.panel-subtitle-spaced { margin-top: 6px; }
 
 /* ── Chaos event banner ── */
 #chaos-event-banner {
