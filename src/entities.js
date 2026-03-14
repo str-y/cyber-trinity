@@ -210,6 +210,8 @@ export class Base {
     this.captureProgress = faction ? CAPTURE_MAX : 0;  // 0–100
     this.captureFaction  = faction;   // which faction is accumulating progress
     this.level = faction ? 1 : 0;    // 0 = neutral, 1–3 = captured levels
+    this.highValue = false;
+    this.highValueMultiplier = 1;
   }
 
   update(dt) {
@@ -267,7 +269,7 @@ export class Base {
     if (this.crystalsStored >= TRILOCK_LEVEL_3_THRESHOLD && this.level < 3) this.level = 3;
     else if (this.crystalsStored >= TRILOCK_LEVEL_2_THRESHOLD && this.level < 2) this.level = 2;
     // Delivery bonus scales with level: Lv1 ×1, Lv2 ×1.25, Lv3 ×1.5
-    const mult = 1 + (this.level - 1) * 0.25;
+    const mult = (1 + (this.level - 1) * 0.25) * Math.max(1, this.highValueMultiplier ?? 1);
     return Math.round(value * mult);
   }
 }
@@ -736,7 +738,8 @@ export class Player {
         this.passiveState?.overclockStacks ?? 0,
       ))
       : 0;
-    this.cooldown = Math.max(0, this.abilityMax - cooldownReduction);
+    const cooldownMult = world._getAbilityCooldownMultiplier?.() ?? 1;
+    this.cooldown = Math.max(0, this.abilityMax * cooldownMult - cooldownReduction);
     if (this.passive?.id === 'overclock' && this.passiveState) {
       this.passiveState.overclockStacks = 0;
     }

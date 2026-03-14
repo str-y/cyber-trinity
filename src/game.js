@@ -154,6 +154,14 @@ const CHAOS_EVENTS = [
     color: '#ff66ff',
     emoji: '💥',
   },
+  {
+    type: 'data_storm',
+    name: 'DATA STORM',
+    duration: 30,
+    description: 'Minimap jammed. Cooldowns x1.5. One base pays x3.',
+    color: '#7df2ff',
+    emoji: '📡',
+  },
 ];
 
 const CHAOS_ZONE_MARGIN = 80;      // px inset from canvas edge for EMP zone placement
@@ -305,6 +313,7 @@ export class Game {
     this.chaosEvent = null;          // active event object or null
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;  // countdown to next event
     this._crystalRainAccum = 0;      // accumulator for crystal rain spawns
+    this.highValueBase = null;
     this.nexusGuardian = null;
 
     // ── Jewel respawn timer ─────────────────────────────────────────────────
@@ -1032,7 +1041,7 @@ export class Game {
           faction: 'blue',
           ttl: 3,
         });
-        this.chaosEvent = null;
+        this._clearChaosEvent();
         this.chaosEventTimer = this.config.chaosInterval;
       }
       return;
@@ -1059,6 +1068,13 @@ export class Game {
       event.x = m + Math.random() * (this.width - m * 2);
       event.y = m + Math.random() * (this.height - m * 2);
       event.radius = 120 + Math.random() * 60;  // 120-180 px radius
+    } else if (spec.type === 'data_storm') {
+      const targetBase = this._setRandomHighValueBase();
+      if (targetBase) {
+        event.targetLabel = this._formatBaseLabel(targetBase);
+        event.description = `Minimap jammed. Cooldowns x1.5. ${event.targetLabel} pays x3.`;
+      }
+      this._stretchActiveCooldowns(1.5);
     }
 
     this.chaosEvent = event;
@@ -1070,6 +1086,51 @@ export class Game {
       faction: 'blue',
       ttl: 4,
     });
+  }
+
+  _clearChaosEvent() {
+    this.chaosEvent = null;
+    this._clearHighValueBase();
+  }
+
+  _getAbilityCooldownMultiplier() {
+    return this.chaosEvent?.type === 'data_storm' ? 1.5 : 1;
+  }
+
+  _stretchActiveCooldowns(multiplier) {
+    for (const player of this.players) {
+      player.cooldown *= multiplier;
+      player.cooldown2 *= multiplier;
+      player.ultCooldown *= multiplier;
+    }
+  }
+
+  _clearHighValueBase() {
+    if (this.highValueBase) {
+      this.highValueBase.highValue = false;
+      this.highValueBase.highValueMultiplier = 1;
+    }
+    this.highValueBase = null;
+  }
+
+  _setRandomHighValueBase() {
+    this._clearHighValueBase();
+    const candidates = [
+      ...Object.values(this.bases),
+      ...this.trilocks.filter(base => !!base.faction),
+    ];
+    const target = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+    if (!target) return null;
+    target.highValue = true;
+    target.highValueMultiplier = 3;
+    this.highValueBase = target;
+    return target;
+  }
+
+  _formatBaseLabel(base) {
+    if (!base) return 'TARGET BASE';
+    if (base.isHome) return `${base.faction.toUpperCase()} HOME`;
+    return base.faction ? `${base.faction.toUpperCase()} TRILOCK` : 'TRILOCK';
   }
 
   _registerDamage(target, attackerFaction) {
@@ -1219,7 +1280,7 @@ export class Game {
     };
 
     // Reset chaos events
-    this.chaosEvent = null;
+    this._clearChaosEvent();
     this.chaosEventTimer = CHAOS_EVENT_INITIAL_DELAY;
     this._crystalRainAccum = 0;
     this._resetNexusGuardian();
@@ -1673,12 +1734,14 @@ export class Game {
           x: round(base.x),
           y: round(base.y),
           shieldPulse: round(base.shieldPulse),
-          crystalsStored: base.crystalsStored,
-          isHome: base.isHome,
-          captureProgress: round(base.captureProgress ?? 0),
-          captureFaction: base.captureFaction,
-          level: base.level ?? 0,
-        }]),
+        crystalsStored: base.crystalsStored,
+        isHome: base.isHome,
+        captureProgress: round(base.captureProgress ?? 0),
+        captureFaction: base.captureFaction,
+        level: base.level ?? 0,
+        highValue: !!base.highValue,
+        highValueMultiplier: base.highValueMultiplier ?? 1,
+      }]),
       ),
       trilocks: this.trilocks.map(tl => ({
         faction: tl.faction,
@@ -1690,6 +1753,8 @@ export class Game {
         captureProgress: round(tl.captureProgress ?? 0),
         captureFaction: tl.captureFaction,
         level: tl.level ?? 0,
+        highValue: !!tl.highValue,
+        highValueMultiplier: tl.highValueMultiplier ?? 1,
       })),
       players: this.players.map(player => ({
         faction: player.faction,
@@ -1759,6 +1824,7 @@ export class Game {
       members: [...frame.alliance.members],
       target: frame.alliance.target,
     } : null;
+    this._clearHighValueBase();
     this.chaosEvent = frame.chaosEvent ? { ...frame.chaosEvent } : null;
     this.factionBuffs = Object.fromEntries(
       Object.entries(frame.factionBuffs ?? {}).map(([faction, buff]) => [faction, { ...buff }]),
@@ -1780,6 +1846,10 @@ export class Game {
       if (!trilock) return;
       Object.assign(trilock, snapshot);
     });
+    this.highValueBase = [
+      ...Object.values(this.bases),
+      ...this.trilocks,
+    ].find(base => base.highValue) ?? null;
 
     this.players.forEach(player => {
       player.carrying = [];
@@ -2126,7 +2196,6 @@ export class Game {
       this._nexusGuardianAttack(playersInArena);
     }
 
-  }
   }
 
   // ── TriLock capture update ───────────────────────────────────────────────

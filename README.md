@@ -146,7 +146,7 @@ Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Sco
 - **Death penalty** — killed agents drop ALL carried jewels on the ground.
 - **Hate control** — AI fighters target the leading team 60% of the time.
 - **Combat scoring**: defeating an enemy agent grants **+5 points**, and recent damage contributors receive an **assist +2 points**.
-- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload.
+- **Chaos events** fire every 30 s: EMP Storm, Crystal Rain, Nexus Overload, and Data Storm.
 - **Feature contracts** chain: Overclock Uplink → Deploy Firewall → Core Meltdown.
 
 ---
