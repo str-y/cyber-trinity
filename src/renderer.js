@@ -21,6 +21,7 @@ function withAlpha(hex, a) {
 }
 
 const RING_PARTICLE_ALPHA = 0.95;
+const CAMERA_ZOOM_THRESHOLD = 1.001;
 
 // ── Renderer class ────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ export class Renderer {
     this.canvas = canvas;
     this.ctx    = canvas.getContext('2d');
     this.time   = 0;
+    this.minimapBounds = null;
   }
 
   resize(w, h) {
@@ -40,10 +42,20 @@ export class Renderer {
     this.time += dt;
     const ctx = this.ctx;
     const { width: W, height: H } = world;
+    const camera = world.getCameraState?.() ?? {
+      x: W / 2,
+      y: H / 2,
+      zoom: 1,
+      mode: 'overhead',
+      active: false,
+    };
 
     // ── Background ─────────────────────────────────────────────────────────
     ctx.fillStyle = '#050810';
     ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    this._applyCamera(camera, W, H);
 
     // Subtle grid (industrial floor)
     this._drawGrid(W, H);
@@ -73,6 +85,10 @@ export class Renderer {
       for (const tl of world.trilocks) {
         this._drawTriLock(tl, world);
       }
+    }
+
+    if (world.nexusGuardian?.state === 'active') {
+      this._drawNexusGuardian(world.nexusGuardian);
     }
 
     // ── Jewels (value-tiered) ──────────────────────────────────────────────
@@ -129,6 +145,31 @@ export class Renderer {
     this.ctx.translate(-cx, -cy);
   }
 
+  _applyCamera(camera, W, H) {
+    const zoom = camera?.zoom ?? 1;
+    if (zoom <= CAMERA_ZOOM_THRESHOLD) return;
+    const x = camera?.x ?? W / 2;
+    const y = camera?.y ?? H / 2;
+    this.ctx.setTransform(zoom, 0, 0, zoom, W / 2 - x * zoom, H / 2 - y * zoom);
+  }
+
+  screenToMinimapWorld(clientX, clientY, world) {
+    if (!this.minimapBounds || !world?.width || !world?.height) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+    const bounds = this.minimapBounds;
+    if (x < bounds.x || x > bounds.x + bounds.width ||
+        y < bounds.y || y > bounds.y + bounds.height) {
+      return null;
+    }
+    return {
+      x: ((x - bounds.x) / bounds.width) * world.width,
+      y: ((y - bounds.y) / bounds.height) * world.height,
+    };
+  }
   // ── Grid ──────────────────────────────────────────────────────────────────
 
   _drawGrid(W, H) {
@@ -643,54 +684,140 @@ export class Renderer {
       ctx.restore();
     }
 
-    if (!local?.alive || !target?.alive) return;
+    if (world.minimapPins) {
+      for (const pin of world.minimapPins) {
+        const style = this._pinStyle(pin.type);
+        const pulse = 0.45 + 0.3 * Math.sin(this.time * 7 + pin.x * 0.01);
+        ctx.save();
+        ctx.strokeStyle = withAlpha(style.color, 0.45 + pulse * 0.35);
+        ctx.fillStyle = withAlpha(style.color, 0.10 + pulse * 0.10);
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 10]);
+        ctx.beginPath();
+        ctx.arc(pin.x, pin.y, pin.radius * 0.38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = withAlpha(style.color, 0.95);
+        ctx.font = 'bold 11px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.glyph, pin.x, pin.y + 4);
+        ctx.font = 'bold 9px "Courier New", monospace';
+        ctx.fillText(style.label, pin.x, pin.y - pin.radius * 0.38 - 10);
+        ctx.restore();
+      }
+    }
 
-    const dx = target.x - local.x;
-    const dy = target.y - local.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const nx = dx / len;
-    const ny = dy / len;
-    const arrowX = local.x + nx * Math.min(54, len * 0.45);
-    const arrowY = local.y + ny * Math.min(54, len * 0.45);
-    const targetColor = FACTIONS[target.faction].color;
-    const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
+    if (local?.alive && target?.alive) {
+      const dx = target.x - local.x;
+      const dy = target.y - local.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dx / len;
+      const ny = dy / len;
+      const arrowX = local.x + nx * Math.min(54, len * 0.45);
+      const arrowY = local.y + ny * Math.min(54, len * 0.45);
+      const targetColor = FACTIONS[target.faction].color;
+      const pulse = 0.55 + 0.35 * Math.sin(this.time * 7);
 
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 10]);
+      ctx.beginPath();
+      ctx.moveTo(local.x, local.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.translate(arrowX, arrowY);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = withAlpha(targetColor, 0.9);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-6, -8);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(targetColor, 0.95);
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+      ctx.restore();
+    }
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 10]);
+      ctx.beginPath();
+      ctx.moveTo(local.x, local.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.translate(arrowX, arrowY);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = withAlpha(targetColor, 0.9);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.moveTo(14, 0);
+      ctx.lineTo(-6, -8);
+      ctx.lineTo(-2, 0);
+      ctx.lineTo(-6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
+      ctx.lineWidth = 2;
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = targetColor;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(targetColor, 0.95);
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+      ctx.restore();
+    }
+
+    const spectated = world.spectatorTarget;
+    if (!world.spectatorMode || !spectated?.alive) return;
+
+    const f = FACTIONS[spectated.faction];
+    const pulse = 0.45 + 0.3 * Math.sin(this.time * 6);
     ctx.save();
-    ctx.strokeStyle = withAlpha(targetColor, 0.35 + pulse * 0.25);
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 10]);
+    ctx.strokeStyle = withAlpha(f.color, 0.45 + pulse * 0.4);
+    ctx.lineWidth = 2.5;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = f.color;
     ctx.beginPath();
-    ctx.moveTo(local.x, local.y);
-    ctx.lineTo(target.x, target.y);
+    ctx.arc(spectated.x, spectated.y, PLAYER_RADIUS + 13, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.setLineDash([]);
-
-    ctx.translate(arrowX, arrowY);
-    ctx.rotate(Math.atan2(dy, dx));
-    ctx.fillStyle = withAlpha(targetColor, 0.9);
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = targetColor;
-    ctx.beginPath();
-    ctx.moveTo(14, 0);
-    ctx.lineTo(-6, -8);
-    ctx.lineTo(-2, 0);
-    ctx.lineTo(-6, 8);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = withAlpha(targetColor, 0.5 + pulse * 0.35);
-    ctx.lineWidth = 2;
-    ctx.shadowBlur = 16;
-    ctx.shadowColor = targetColor;
-    ctx.beginPath();
-    ctx.arc(target.x, target.y, PLAYER_RADIUS + 9, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = withAlpha(targetColor, 0.95);
+    ctx.fillStyle = withAlpha(f.color, 0.95);
     ctx.font = 'bold 9px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('TARGET', target.x, target.y - PLAYER_RADIUS - 18);
+    ctx.fillText(
+      world.getCameraState?.().mode === 'follow' ? 'FOLLOW CAM' : 'SPECTATE',
+      spectated.x,
+      spectated.y - PLAYER_RADIUS - 20,
+    );
     ctx.restore();
   }
 
@@ -998,6 +1125,76 @@ export class Renderer {
     ctx.restore();
   }
 
+  _drawNexusGuardian(guardian) {
+    const ctx = this.ctx;
+    const pulse = 0.5 + 0.25 * Math.sin(this.time * 2.8);
+    const R = guardian.radius;
+
+    ctx.save();
+
+    const glow = ctx.createRadialGradient(guardian.x, guardian.y, R * 0.2, guardian.x, guardian.y, R * 2.7);
+    glow.addColorStop(0, `rgba(125,230,255,${0.28 + pulse * 0.18})`);
+    glow.addColorStop(0.5, 'rgba(110,190,255,0.14)');
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, R * 2.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(125,230,255,${0.35 + pulse * 0.25})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -this.time * 30;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, guardian.arenaRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(110,180,220,0.18)';
+    ctx.strokeStyle = 'rgba(160,245,255,0.75)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(guardian.x, guardian.y - R);
+    ctx.lineTo(guardian.x + R * 0.7, guardian.y - R * 0.15);
+    ctx.lineTo(guardian.x + R * 0.55, guardian.y + R * 0.75);
+    ctx.lineTo(guardian.x - R * 0.55, guardian.y + R * 0.75);
+    ctx.lineTo(guardian.x - R * 0.7, guardian.y - R * 0.15);
+    ctx.closePath();
+    ctx.shadowBlur = 24;
+    ctx.shadowColor = '#7de6ff';
+    ctx.fill();
+    ctx.stroke();
+
+    const core = ctx.createRadialGradient(guardian.x, guardian.y, R * 0.05, guardian.x, guardian.y, R * 0.55);
+    core.addColorStop(0, 'rgba(255,255,255,0.95)');
+    core.addColorStop(0.4, `rgba(160,250,255,${0.85 + pulse * 0.1})`);
+    core.addColorStop(1, 'rgba(20,80,120,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(guardian.x, guardian.y, R * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+
+    const hpPct = Math.max(0, guardian.health / Math.max(1, guardian.maxHealth));
+    const barW = 150;
+    const barH = 9;
+    const barX = guardian.x - barW / 2;
+    const barY = guardian.y - guardian.arenaRadius - 24;
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(0,8,18,0.8)';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.strokeStyle = 'rgba(125,230,255,0.55)';
+    ctx.strokeRect(barX, barY, barW, barH);
+    ctx.fillStyle = 'rgba(125,230,255,0.9)';
+    ctx.fillRect(barX + 1, barY + 1, (barW - 2) * hpPct, barH - 2);
+
+    ctx.font = 'bold 12px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#c6f8ff';
+    ctx.fillText('NEXUS GUARDIAN', guardian.x, barY - 8);
+
+    ctx.restore();
+  }
+
   // ── Match timer (centre top, rendered on canvas for visibility) ────────
 
   _drawMatchTimer(world, W, H) {
@@ -1044,16 +1241,36 @@ export class Renderer {
     const y0     = H - mapH - ABILITY_PANEL_CLEARANCE;
     const wW     = world.width;
     const wH     = world.height;
+    const local  = world.localPlayer;
+    const visionRadius = local?.passiveState?.minimapVisionRadius ?? 240;
+    const filters = world.hud?.getMinimapFilters?.() ?? {
+      agents: { blue: true, green: true, red: true },
+      crystals: true,
+      chaosZones: true,
+    };
+    const agentFilters = filters.agents ?? { blue: true, green: true, red: true };
+    const localBaseAlert = local?.faction ? world.baseAttackAlerts?.[local.faction] : null;
+    const alertPulse = 0.35 + 0.3 * Math.sin(this.time * 10);
+    this.minimapBounds = { x: x0, y: y0, width: mapW, height: mapH };
 
     // Map world coordinates → minimap pixel coordinates
     const mx = (wx) => x0 + (wx / wW) * mapW;
     const my = (wy) => y0 + (wy / wH) * mapH;
+    const isVisible = (wx, wy, faction = null) => {
+      if (!local?.alive) return true;
+      if (faction === local.faction) return true;
+      return Math.hypot(wx - local.x, wy - local.y) <= visionRadius;
+    };
 
     ctx.save();
 
     // ── Background panel ─────────────────────────────────────────────────
-    ctx.fillStyle   = 'rgba(2,8,20,0.72)';
-    ctx.strokeStyle = 'rgba(80,140,255,0.30)';
+    ctx.fillStyle   = localBaseAlert?.active
+      ? `rgba(40,6,12,${0.72 + alertPulse * 0.08})`
+      : 'rgba(2,8,20,0.72)';
+    ctx.strokeStyle = localBaseAlert?.active
+      ? `rgba(255,68,68,${0.45 + alertPulse * 0.45})`
+      : 'rgba(80,140,255,0.30)';
     ctx.lineWidth   = 1;
     ctx.fillRect(x0, y0, mapW, mapH);
     ctx.strokeRect(x0, y0, mapW, mapH);
@@ -1062,6 +1279,28 @@ export class Renderer {
     ctx.beginPath();
     ctx.rect(x0, y0, mapW, mapH);
     ctx.clip();
+
+    if (filters.chaosZones && world.chaosEvent) {
+      const event = world.chaosEvent;
+      const pulse = 0.15 + 0.18 * Math.sin(this.time * 8);
+      ctx.save();
+      if (event.type === 'emp_storm') {
+        ctx.strokeStyle = withAlpha(event.color, 0.5 + pulse);
+        ctx.fillStyle = withAlpha(event.color, pulse * 0.45);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mx(event.x), my(event.y), (event.radius / wW) * mapW, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = withAlpha(event.color, 0.45 + pulse);
+        ctx.fillStyle = withAlpha(event.color, 0.08 + pulse * 0.18);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x0 + 3, y0 + 3, mapW - 6, mapH - 6);
+        ctx.fillRect(x0 + 3, y0 + 3, mapW - 6, mapH - 6);
+      }
+      ctx.restore();
+    }
 
     // ── Home bases (large dots) ──────────────────────────────────────────
     for (const base of Object.values(world.bases)) {
@@ -1078,6 +1317,7 @@ export class Renderer {
     // ── TriLock bases (medium dots) ──────────────────────────────────────
     if (world.trilocks) {
       for (const tl of world.trilocks) {
+        if (!isVisible(tl.x, tl.y, tl.faction)) continue;
         const color = tl.faction ? FACTIONS[tl.faction].color : '#666677';
         const { r, g, b } = hexToRgb(color);
         ctx.fillStyle  = `rgba(${r},${g},${b},0.75)`;
@@ -1089,23 +1329,46 @@ export class Renderer {
       }
     }
 
-    // ── Crystals (white, blinking) ────────────────────────────────────────
-    const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
-    for (const crystal of world.crystals) {
-      if (crystal.delivered) continue;
-      const tColor = crystal.tierColor ?? '#a0d4ff';
-      const { r, g, b } = hexToRgb(tColor);
-      ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
+    if (world.nexusGuardian?.state === 'active') {
+      const guardian = world.nexusGuardian;
+      const px = mx(guardian.x);
+      const py = my(guardian.y);
+      const pulse = 0.45 + 0.35 * Math.sin(this.time * 8);
+      ctx.strokeStyle = `rgba(160,250,255,${0.55 + pulse * 0.3})`;
+      ctx.fillStyle = 'rgba(160,250,255,0.95)';
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.arc(mx(crystal.x), my(crystal.y), 1.8, 0, Math.PI * 2);
+      ctx.moveTo(px, py - 5);
+      ctx.lineTo(px + 5, py);
+      ctx.lineTo(px, py + 5);
+      ctx.lineTo(px - 5, py);
+      ctx.closePath();
+      ctx.stroke();
       ctx.fill();
+    }
+
+    // ── Crystals (white, blinking) ────────────────────────────────────────
+    if (filters.crystals) {
+      const blinkAlpha = 0.55 + 0.45 * Math.sin(this.time * 5);
+      for (const crystal of world.crystals) {
+        if (crystal.delivered) continue;
+        if (!isVisible(crystal.x, crystal.y)) continue;
+        const tColor = crystal.tierColor ?? '#a0d4ff';
+        const { r, g, b } = hexToRgb(tColor);
+        ctx.fillStyle  = `rgba(255,255,255,${blinkAlpha})`;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = `rgba(${r},${g},${b},0.8)`;
+        ctx.beginPath();
+        ctx.arc(mx(crystal.x), my(crystal.y), 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // ── Agents (small faction-coloured dots) ──────────────────────────────
     for (const player of world.players) {
       if (!player.alive) continue;
+      if (!isVisible(player.x, player.y, player.faction)) continue;
+       if (!agentFilters[player.faction]) continue;
       const f = FACTIONS[player.faction];
       const { r, g, b } = hexToRgb(f.color);
       ctx.fillStyle  = `rgba(${r},${g},${b},0.95)`;
@@ -1114,6 +1377,41 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(mx(player.x), my(player.y), 2.5, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    if (world.recentDeaths) {
+      for (const marker of world.recentDeaths) {
+        if (!isVisible(marker.x, marker.y, marker.faction)) continue;
+        const alpha = Math.min(1, marker.timer / 1.5);
+        ctx.strokeStyle = `rgba(255,90,90,${alpha})`;
+        ctx.lineWidth = 1.2;
+        const px = mx(marker.x);
+        const py = my(marker.y);
+        ctx.beginPath();
+        ctx.moveTo(px - 3, py - 3);
+        ctx.lineTo(px + 3, py + 3);
+        ctx.moveTo(px + 3, py - 3);
+        ctx.lineTo(px - 3, py + 3);
+        ctx.stroke();
+      }
+    }
+
+    if (world.minimapPins) {
+      for (const pin of world.minimapPins) {
+        const style = this._pinStyle(pin.type);
+        const pulse = 0.45 + 0.35 * Math.sin(this.time * 8 + pin.y * 0.01);
+        const px = mx(pin.x);
+        const py = my(pin.y);
+        ctx.strokeStyle = withAlpha(style.color, 0.45 + pulse * 0.35);
+        ctx.fillStyle = withAlpha(style.color, 0.9);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.font = 'bold 7px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(style.glyph, px, py + 2.5);
+      }
     }
 
     ctx.shadowBlur = 0;
@@ -1125,7 +1423,27 @@ export class Renderer {
     ctx.font         = 'bold 7px "Courier New", monospace';
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('MAP', x0 + 4, y0 + 3);
+    ctx.fillText(localBaseAlert?.active ? 'MAP ALERT' : 'MAP', x0 + 4, y0 + 3);
+    if (local?.alive) {
+      const revealRadius = (visionRadius / wW) * mapW;
+      ctx.strokeStyle = withAlpha(FACTIONS[local.faction].color, 0.5);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(mx(local.x), my(local.y), Math.max(10, revealRadius), 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
+  }
+
+  getSelectedPinType() {
+    return this._selectedPinType;
+  }
+
+  _pinStyle(type) {
+    return {
+      gather: { color: '#4aa8ff', glyph: '⌁', label: 'GROUP' },
+      danger: { color: '#ff4444', glyph: '!', label: 'DANGER' },
+      crystal: { color: '#ffd700', glyph: '◆', label: 'CRYSTAL' },
+    }[type] ?? { color: '#4aa8ff', glyph: '⌁', label: 'GROUP' };
   }
 }
