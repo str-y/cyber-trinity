@@ -324,6 +324,7 @@ const AI_DIFFICULTY = {
     aimLead: 0,
     aimJitter: 18,
     interceptPlayer: false,
+    playerInterceptRange: 0,
   },
   normal: {
     speedMult: 1.00,
@@ -341,6 +342,7 @@ const AI_DIFFICULTY = {
     aimLead: 0.08,
     aimJitter: 8,
     interceptPlayer: false,
+    playerInterceptRange: 0,
   },
   hard: {
     speedMult: 1.20,
@@ -358,6 +360,7 @@ const AI_DIFFICULTY = {
     aimLead: 0.18,
     aimJitter: 3,
     interceptPlayer: false,
+    playerInterceptRange: 0,
   },
   expert: {
     speedMult: 1.40,
@@ -375,6 +378,7 @@ const AI_DIFFICULTY = {
     aimLead: 0.32,
     aimJitter: 0,
     interceptPlayer: true,
+    playerInterceptRange: 260,
   },
 };
 
@@ -606,7 +610,7 @@ export class Game {
     const playersPerFaction = this.modeRules.playersPerFaction;
     for (const faction of ['blue', 'green', 'red']) {
       const base = this.bases[faction];
-      const diff = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
+      const aiProfile = AI_DIFFICULTY[this.config.aiDifficulty[faction]] ?? AI_DIFFICULTY.normal;
       for (let i = 0; i < playersPerFaction; i++) {
         const angle = (i / playersPerFaction) * Math.PI * 2;
         const r     = this.modeRules.spawnOrbit + Math.random() * this.modeRules.spawnOrbitVariance;
@@ -621,11 +625,11 @@ export class Game {
         const isHumanPlayer = faction === this.playerFaction && i === 0;
         if (!isHumanPlayer) {
           p.aiDifficulty = this.config.aiDifficulty[faction];
-          p.aiProfile = diff;
-          p.aiDecisionTimer = Math.random() * diff.reactionTime;
-          p.speed                = Math.round(p.speed * diff.speedMult);
-          p.aggro                = Math.min(1, p.aggro * diff.aggroMult);
-          p.abilityDifficultyMult = diff.abilityMult;  // per-frame ability chance scalar
+          p.aiProfile = aiProfile;
+          p.aiDecisionTimer = Math.random() * aiProfile.reactionTime;
+          p.speed                = Math.round(p.speed * aiProfile.speedMult);
+          p.aggro                = Math.min(1, p.aggro * aiProfile.aggroMult);
+          p.abilityDifficultyMult = aiProfile.abilityMult;  // per-frame ability chance scalar
         }
         if (this._isSandboxMode() && !isHumanPlayer) {
           p.aiDisabled = true;

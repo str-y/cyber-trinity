@@ -166,6 +166,8 @@ export const CAPTURE_SPEED    = 20;   // progress per second per player inside
 export const CAPTURE_MAX      = 100;  // full capture at this value
 export const TRILOCK_MAX_LEVEL = 3;
 const PLAYER_AURA_DESYNC_MAX = 0.16;
+const PLAYER_AIM_LEAD_MULTIPLIER = 1.5;
+const TARGET_REACH_DISTANCE = 20;
 const MIN_PARTICLE_SIZE = 0.2;
 
 // ── TriLock level-up thresholds ──────────────────────────────────────────
@@ -436,8 +438,8 @@ export class Player {
 
     // Carrying jewels → deliver to nearest owned TriLock (or home base)
     if (this.carrying.length > 0) {
-      const shouldDelayDelivery = this.carrying.length < (aiProfile.deliveryThreshold ?? 1);
-      if (shouldDelayDelivery) {
+      const belowDeliveryThreshold = this.carrying.length < (aiProfile.deliveryThreshold ?? 1);
+      if (belowDeliveryThreshold) {
         const nextCrystal = world._nearestFreeCrystal(this.x, this.y, this);
         if (nextCrystal && dist(this.x, this.y, nextCrystal.x, nextCrystal.y) <= (aiProfile.deliverySearchRadius ?? 0)) {
           this.state = 'carry';
@@ -482,12 +484,13 @@ export class Player {
     const leadFaction = world._leadingFaction?.();
 
     // ── Role-specific decision logic ──────────────────────────────────────
-    const targetReached = this.target && dist(this.x, this.y, this.target.x, this.target.y) < 20;
+    const targetReached = this.target &&
+      dist(this.x, this.y, this.target.x, this.target.y) < TARGET_REACH_DISTANCE;
     const shouldRethink = !this.target ||
       this.aiDecisionTimer <= 0 ||
-      (this.state === 'attack' && (!this.target.alive || this.target.faction === this.faction)) ||
+      (this.state === 'attack' && (!this.target?.alive || this.target?.faction === this.faction)) ||
       (this.state === 'carry' && this.target instanceof MemoryCrystal &&
-        (this.target.delivered || (this.target.carrier && this.target.carrier !== this))) ||
+        (this.target?.delivered || (this.target?.carrier && this.target.carrier !== this))) ||
       ((this.state === 'roam' || this.state === 'defend' || this.state === 'rally') && targetReached);
 
     if (!rallying && !pinning && !guardianing && shouldRethink) {
@@ -681,7 +684,8 @@ export class Player {
         !(alliance && alliance.members.includes(this.faction) && alliance.members.includes(localPlayer.faction));
 
       if (canInterceptPlayer &&
-          (localPlayer.carrying.length > 0 || dist(this.x, this.y, localPlayer.x, localPlayer.y) < 260)) {
+          (localPlayer.carrying.length > 0 ||
+           dist(this.x, this.y, localPlayer.x, localPlayer.y) < (aiProfile.playerInterceptRange ?? 0))) {
         enemy = localPlayer;
       } else if (alliance && alliance.members.includes(this.faction)) {
         // In alliance: 90% chance to specifically target the alliance target faction
@@ -768,7 +772,7 @@ export class Player {
     let ty = this.target.y;
     if (!this.isPlayerControlled && this.state === 'attack' && this.aiProfile?.aimLead &&
         Number.isFinite(this.target?.vx) && Number.isFinite(this.target?.vy)) {
-      const lead = this.aiProfile.aimLead * (this.target.isPlayerControlled ? 1.5 : 1);
+      const lead = this.aiProfile.aimLead * (this.target.isPlayerControlled ? PLAYER_AIM_LEAD_MULTIPLIER : 1);
       tx += this.target.vx * lead;
       ty += this.target.vy * lead;
     }
@@ -843,7 +847,7 @@ export class Player {
     let aimX = enemy.x;
     let aimY = enemy.y;
     if (aiProfile?.aimLead && Number.isFinite(enemy.vx) && Number.isFinite(enemy.vy)) {
-      const lead = aiProfile.aimLead * (enemy.isPlayerControlled ? 1.5 : 1);
+      const lead = aiProfile.aimLead * (enemy.isPlayerControlled ? PLAYER_AIM_LEAD_MULTIPLIER : 1);
       aimX += enemy.vx * lead;
       aimY += enemy.vy * lead;
     }
