@@ -54,9 +54,9 @@ Game (world state, update loop)
 
 | Rule | Detail |
 |------|--------|
-| **Teams** | 3 teams × 5 agents (5v5v5) |
-| **Match length** | 5 minutes (300 s countdown) |
-| **Victory** | Team with the most **win points** when time expires |
+| **Teams** | Standard: 3 teams × 5 agents (5v5v5) / Quick Match: 3 teams × 2 agents (2v2v2) |
+| **Match length** | Standard: 5 minutes / Quick Match: 3 minutes |
+| **Victory** | Standard: first to 150 points (or highest score at time-up) / Quick Match: first to 80 points |
 | **Jewel delivery** | Pick up jewels → deliver to any owned base (home or captured TriLock) |
 | **TriLock capture** | Stand inside a neutral/enemy TriLock to capture it; contested = no progress |
 | **Death penalty** | On death, drop ALL carried jewels on the ground |
@@ -138,10 +138,10 @@ Each team fields 5 agents across 4 jobs (index 0–4: Warrior, Mage, Healer, Sco
 
 ## Mechanics
 
-- **15 agents** compete simultaneously (5v5v5), each with a job class.
+- **Two playable rule sets** — Standard runs at 5v5v5, while Quick Match compresses the loop into 2v2v2.
 - **Jewels** (`MemoryCrystal`) — value-tiered glowing polyhedra scattered across the field.
   Agents pick them up (carry up to 5) and deliver them to an owned base for points.
-- **TriLock bases** — 5 neutral hexagonal bases scattered in a ring at the centre.
+- **TriLock bases** — Standard uses 5 neutral bases in a ring; Quick Match uses 3 bases in a compact triangle.
   Capture by standing in range; level up through deliveries.
 - **Death penalty** — killed agents drop ALL carried jewels on the ground.
 - **Hate control** — AI fighters target the leading team 60% of the time.

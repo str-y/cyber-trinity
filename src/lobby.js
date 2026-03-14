@@ -13,7 +13,7 @@
 
 export const DEFAULT_CONFIG = {
   matchDuration:      300,      // seconds  (180 / 300 / 600)
-  winScore:           0,        // 0 = disabled; 80 / 150 / 300
+  winScore:           150,      // standard mode target; 2v2v2 mode forces 80
   chaosEnabled:       true,
   chaosInterval:      30,       // seconds  (30 / 60 / 90)
   gameMode:           'standard',  // 'standard' (5v5v5) | 'quick' (2v2v2)
@@ -24,6 +24,31 @@ export const DEFAULT_CONFIG = {
     red:   'normal',
   },
 };
+
+const MODE_PRESETS = {
+  standard: {
+    matchDuration: 300,
+    winScore: 150,
+    playersPerFaction: 5,
+    trilockCount: 5,
+    baseMarginRatio: 0.30,
+    trilockRingRatio: 0.18,
+    label: '5v5v5  STANDARD · 5 MIN / 150 PTS',
+  },
+  quick: {
+    matchDuration: 180,
+    winScore: 80,
+    playersPerFaction: 2,
+    trilockCount: 3,
+    baseMarginRatio: 0.22,
+    trilockRingRatio: 0.11,
+    label: '2v2v2  QUICK · 3 MIN / 80 PTS',
+  },
+};
+
+function getModePreset(mode = 'standard') {
+  return MODE_PRESETS[mode] ?? MODE_PRESETS.standard;
+}
 
 // ── Preset helpers ────────────────────────────────────────────────────────────
 
@@ -72,6 +97,7 @@ function drawPreview(canvas, config) {
 
   const cx = W / 2;
   const cy = H / 2;
+  const preset = getModePreset(config.gameMode);
 
   // Background
   ctx.fillStyle = 'rgba(0, 10, 30, 0.95)';
@@ -87,7 +113,7 @@ function drawPreview(canvas, config) {
     ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
   }
 
-  const margin = Math.min(W, H) * 0.30;
+  const margin = Math.min(W, H) * preset.baseMarginRatio;
   const FACTION_COLORS = { blue: '#4aa8ff', green: '#50ff78', red: '#ff4444' };
   const bases = {
     blue:  { x: cx,                y: cy - margin },
@@ -95,9 +121,14 @@ function drawPreview(canvas, config) {
     red:   { x: cx + margin * 0.88, y: cy + margin * 0.58 },
   };
 
-  // TriLock ring (5 neutral bases)
-  const ringR = Math.min(W, H) * 0.18;
-  const TRILOCK_COUNT = 5;
+  if (config.gameMode === 'quick') {
+    ctx.strokeStyle = 'rgba(80,255,120,0.18)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - W * 0.22, cy - H * 0.22, W * 0.44, H * 0.44);
+  }
+
+  // TriLock ring (mode-dependent neutral bases)
+  const ringR = Math.min(W, H) * preset.trilockRingRatio;
   ctx.strokeStyle = 'rgba(160,212,255,0.30)';
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 5]);
@@ -106,8 +137,8 @@ function drawPreview(canvas, config) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  for (let i = 0; i < TRILOCK_COUNT; i++) {
-    const angle = (i / TRILOCK_COUNT) * Math.PI * 2 - Math.PI / 2;
+  for (let i = 0; i < preset.trilockCount; i++) {
+    const angle = (i / preset.trilockCount) * Math.PI * 2 - Math.PI / 2;
     const tx = cx + Math.cos(angle) * ringR;
     const ty = cy + Math.sin(angle) * ringR;
     ctx.beginPath();
@@ -120,7 +151,7 @@ function drawPreview(canvas, config) {
   }
 
   // Home bases + player dots
-  const playersPerFaction = config.gameMode === 'quick' ? 2 : 5;
+  const playersPerFaction = preset.playersPerFaction;
   for (const [faction, pos] of Object.entries(bases)) {
     const color = FACTION_COLORS[faction];
 
@@ -156,7 +187,7 @@ function drawPreview(canvas, config) {
   }
 
   // Label
-  const modeLabel = config.gameMode === 'quick' ? '2v2v2  QUICK' : '5v5v5  STANDARD';
+  const modeLabel = preset.label;
   ctx.fillStyle = 'rgba(160,212,255,0.65)';
   ctx.font = '9px "Courier New", monospace';
   ctx.textAlign = 'center';
@@ -175,7 +206,7 @@ function buildLobbyInner() {
       <div id="lobby-settings">
 
         <div class="setting-group">
-          <div class="setting-label">MATCH TIME</div>
+          <div class="setting-label">MATCH TIME <span class="setting-sub">(mode preset)</span></div>
           <div class="setting-options" data-setting="matchDuration">
             <button class="opt-btn" data-value="180">3 MIN</button>
             <button class="opt-btn selected" data-value="300">5 MIN</button>
@@ -184,11 +215,11 @@ function buildLobbyInner() {
         </div>
 
         <div class="setting-group">
-          <div class="setting-label">WIN SCORE <span class="setting-sub">(0 = disabled)</span></div>
+          <div class="setting-label">WIN SCORE <span class="setting-sub">(mode preset)</span></div>
           <div class="setting-options" data-setting="winScore">
-            <button class="opt-btn selected" data-value="0">OFF</button>
+            <button class="opt-btn" data-value="0">OFF</button>
             <button class="opt-btn" data-value="80">80</button>
-            <button class="opt-btn" data-value="150">150</button>
+            <button class="opt-btn selected" data-value="150">150</button>
             <button class="opt-btn" data-value="300">300</button>
           </div>
         </div>
@@ -306,12 +337,31 @@ export function initLobby(els, onLaunch) {
   const previewCanvas = panel.querySelector('#lobby-preview-canvas');
   const chaosFreqRow  = panel.querySelector('#chaos-freq-row');
 
+  function applyModePreset(mode) {
+    const preset = getModePreset(mode);
+    config.matchDuration = preset.matchDuration;
+    config.winScore = preset.winScore;
+  }
+
   function refreshPreview() {
     drawPreview(previewCanvas, config);
   }
 
   function syncChaosFreqVisibility() {
     chaosFreqRow.style.display = config.chaosEnabled ? 'flex' : 'none';
+  }
+
+  function syncModeLockedSettings() {
+    const preset = getModePreset(config.gameMode);
+    for (const setting of ['matchDuration', 'winScore']) {
+      const group = panel.querySelector(`.setting-options[data-setting="${setting}"]`);
+      if (!group) continue;
+      for (const btn of group.querySelectorAll('.opt-btn')) {
+        const locked = btn.dataset.value !== String(preset[setting]);
+        btn.disabled = locked;
+        btn.title = locked ? `Locked to ${config.gameMode.toUpperCase()} mode preset` : '';
+      }
+    }
   }
 
   function refreshPresetBar() {
@@ -358,9 +408,8 @@ export function initLobby(els, onLaunch) {
   }
 
   function applyConfig(src) {
-    if (src.matchDuration    !== undefined) config.matchDuration    = src.matchDuration;
-    if (src.winScore         !== undefined) config.winScore         = src.winScore;
     if (src.gameMode         !== undefined) config.gameMode         = src.gameMode;
+    applyModePreset(config.gameMode);
     if (src.startingCrystals !== undefined) config.startingCrystals = src.startingCrystals;
     if (src.chaosEnabled     !== undefined) config.chaosEnabled     = src.chaosEnabled;
     if (src.chaosInterval    !== undefined) config.chaosInterval    = src.chaosInterval;
@@ -370,6 +419,7 @@ export function initLobby(els, onLaunch) {
       if (src.aiDifficulty.red   !== undefined) config.aiDifficulty.red   = src.aiDifficulty.red;
     }
     syncAllOptionButtons();
+    syncModeLockedSettings();
     syncChaosFreqVisibility();
     refreshPreview();
   }
@@ -421,13 +471,21 @@ export function initLobby(els, onLaunch) {
     else if (!isNaN(Number(rawValue))) value = Number(rawValue);
     else value = rawValue;
 
+    if (setting === 'gameMode') {
+      config.gameMode = value;
+      applyModePreset(value);
+      syncAllOptionButtons();
+      syncModeLockedSettings();
+      refreshPreview();
+      return;
+    }
+
     config[setting] = value;
     for (const b of group.querySelectorAll('.opt-btn')) {
       b.classList.toggle('selected', b === btn);
     }
 
     if (setting === 'chaosEnabled') syncChaosFreqVisibility();
-    if (setting === 'gameMode')     refreshPreview();
   });
 
   // ── "Configure Faction" button ────────────────────────────────────────────
@@ -463,6 +521,9 @@ export function initLobby(els, onLaunch) {
   }
 
   // ── Initial render ────────────────────────────────────────────────────────
+  applyModePreset(config.gameMode);
+  syncAllOptionButtons();
+  syncModeLockedSettings();
   syncChaosFreqVisibility();
   refreshPreview();
   refreshPresetBar();
