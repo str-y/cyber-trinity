@@ -4,7 +4,11 @@
  * Draws bases, network links, players, crystals, particles, rain, and UI overlays.
  */
 
+<<<<<<< HEAD
+import { FACTIONS, JOBS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+=======
 import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+>>>>>>> main
 import { resolveArmorColor, resolveEffectColor } from './customization.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -292,6 +296,7 @@ export class Renderer {
     const R = BASE_RADIUS;
     const shieldsDown = world?.chaosEvent?.type === 'nexus_overload';
     const highValue = (base.highValueMultiplier ?? 1) > 1;
+    const scoreDisabled = (base.scoreDisabledTimer ?? 0) > 0;
 
     ctx.save();
 
@@ -314,6 +319,21 @@ export class Renderer {
       ctx.lineDashOffset = -this.time * 48;
       ctx.beginPath();
       ctx.arc(base.x, base.y, R + 18 + 3 * Math.sin(this.time * 4), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (scoreDisabled) {
+      const codePulse = 0.45 + 0.35 * Math.sin(this.time * 8 + base.shieldPulse);
+      const codeAlpha = Math.min(1, 0.45 + codePulse * 0.35);
+      ctx.strokeStyle = `rgba(125,242,255,${codeAlpha})`;
+      ctx.lineWidth = 4;
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = '#7df2ff';
+      ctx.setLineDash([6, 6]);
+      ctx.lineDashOffset = -this.time * 52;
+      ctx.beginPath();
+      ctx.arc(base.x, base.y, R + 24, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -363,6 +383,12 @@ export class Renderer {
       ctx.fillStyle = '#7df2ff';
       ctx.font = 'bold 9px "Courier New", monospace';
       ctx.fillText(`HIGH VALUE ×${base.highValueMultiplier ?? 1}`, base.x, base.y - R - 28);
+    }
+
+    if (scoreDisabled) {
+      ctx.fillStyle = '#7df2ff';
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.fillText(`SYSTEM BREACH ${Math.ceil(base.scoreDisabledTimer)}s`, base.x, base.y - R - (highValue ? 40 : 28));
     }
 
     ctx.restore();
@@ -490,7 +516,26 @@ export class Renderer {
     const trailEffect = player.appearance?.trailEffect ?? 'sparks';
     if (pts.length < 2) return;
     ctx.save();
+<<<<<<< HEAD
+    if (player.job === 'hacker') {
+      ctx.lineCap = 'square';
+      ctx.setLineDash([4, 5]);
+      ctx.fillStyle = withAlpha(col, 0.9);
+      for (let i = 1; i < pts.length; i++) {
+        const p0 = pts[i - 1], p1 = pts[i];
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = withAlpha(col, p1.a * 0.45);
+        ctx.lineWidth = 1.6 * p1.a;
+        ctx.stroke();
+        ctx.fillRect(p1.x - 1.6, p1.y - 1.6, 3.2 * p1.a, 3.2 * p1.a);
+      }
+      ctx.setLineDash([]);
+    } else if (trailEffect === 'data') {
+=======
     if (trailEffect === 'data') {
+>>>>>>> main
       ctx.fillStyle = withAlpha(col, 0.85);
       for (let i = 1; i < pts.length; i++) {
         const p0 = pts[i - 1], p1 = pts[i];
@@ -628,8 +673,12 @@ export class Renderer {
       ctx.fillText('YOU', 0, -PLAYER_RADIUS - 8);
     }
 
+<<<<<<< HEAD
+    const itemLabel = JOBS[player.job]?.emoji ?? '⚔️';
+=======
     const jobEmoji = { warrior: '⚔️', mage: '🔮', healer: '💚', scout: '💨' };
     const itemLabel = jobEmoji[player.job] ?? '⚔️';
+>>>>>>> main
     ctx.fillStyle = `rgba(${effectRgb.r},${effectRgb.g},${effectRgb.b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
@@ -734,6 +783,23 @@ export class Renderer {
         ctx.moveTo(proj.x, proj.y);
         ctx.lineTo(proj.x - proj.vx * 0.05, proj.y - proj.vy * 0.05);
         ctx.stroke();
+      } else if (proj.type === 'exploit' || proj.type === 'dataspike' || proj.type === 'systembreach') {
+        const ringRadius = proj.type === 'systembreach' ? proj.radius : 10 + (1 - a) * 10;
+        ctx.shadowBlur = this.lowQuality ? 8 : 16;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, a * 0.9)})`;
+        ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.22})`;
+        ctx.lineWidth = proj.type === 'systembreach' ? 3 : 2;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, ringRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = `rgba(220,245,255,${Math.max(0.4, a)})`;
+        ctx.font = proj.type === 'systembreach' ? 'bold 13px "Courier New", monospace' : 'bold 9px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(proj.type === 'exploit' ? '</>' : proj.type === 'dataspike' ? 'EMP' : 'SYS', proj.x, proj.y);
       }
     }
     ctx.shadowBlur = 0;
@@ -1233,6 +1299,8 @@ export class Renderer {
     const { r, g, b } = hexToRgb(color);
     const shieldsDown = world?.chaosEvent?.type === 'nexus_overload';
     const highValue = (tl.highValueMultiplier ?? 1) > 1;
+    const capturePaused = (tl.capturePausedTimer ?? 0) > 0;
+    const scoreDisabled = (tl.scoreDisabledTimer ?? 0) > 0;
 
     ctx.save();
 
@@ -1275,6 +1343,21 @@ export class Renderer {
       ctx.lineDashOffset = -this.time * 42;
       ctx.beginPath();
       ctx.arc(tl.x, tl.y, R + 14 + 2 * Math.sin(this.time * 5), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    if (capturePaused || scoreDisabled) {
+      const codePulse = 0.45 + 0.35 * Math.sin(this.time * 8 + tl.shieldPulse);
+      const codeAlpha = Math.min(1, 0.35 + codePulse * 0.3);
+      ctx.strokeStyle = `rgba(125,242,255,${codeAlpha})`;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = '#7df2ff';
+      ctx.setLineDash([6, 5]);
+      ctx.lineDashOffset = -this.time * 46;
+      ctx.beginPath();
+      ctx.arc(tl.x, tl.y, R + 18, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
     }
@@ -1322,6 +1405,16 @@ export class Renderer {
       ctx.fillStyle = '#7df2ff';
       ctx.font = 'bold 8px "Courier New", monospace';
       ctx.fillText(`HIGH VALUE ×${tl.highValueMultiplier ?? 1}`, tl.x, tl.y - R - 22);
+    }
+
+    if (capturePaused) {
+      ctx.fillStyle = '#7df2ff';
+      ctx.font = 'bold 8px "Courier New", monospace';
+      ctx.fillText(`DATA SPIKE ${Math.ceil(tl.capturePausedTimer)}s`, tl.x, tl.y - R - (highValue ? 34 : 22));
+    } else if (scoreDisabled) {
+      ctx.fillStyle = '#7df2ff';
+      ctx.font = 'bold 8px "Courier New", monospace';
+      ctx.fillText(`SYSTEM BREACH ${Math.ceil(tl.scoreDisabledTimer)}s`, tl.x, tl.y - R - (highValue ? 34 : 22));
     }
 
     ctx.restore();

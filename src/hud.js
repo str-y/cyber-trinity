@@ -5,7 +5,7 @@
  * jewel counter, TriLock status, hate indicator.
  */
 
-import { FACTIONS } from './entities.js';
+import { FACTIONS, JOBS } from './entities.js';
 
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
@@ -72,7 +72,9 @@ export class HUD {
 
     const legend = document.getElementById('faction-legend');
     if (!legend) return;
-    const jobSummary = '⚔️War ·🔮Mag ·💚Heal ·💨Scout';
+    const jobSummary = Object.values(JOBS)
+      .map(job => `${job.emoji}${job.shortLabel ?? job.label}`)
+      .join(' ·');
     factions.forEach((f, i) => {
       const row = document.createElement('div');
       row.className = 'legend-row';
@@ -1047,12 +1049,9 @@ export class HUD {
     }
 
     const currentJob = world.localPlayer?.job ?? 'warrior';
-    const jobLabels = {
-      warrior: '⚔️ WARRIOR',
-      mage: '🔮 MAGE',
-      healer: '💚 HEALER',
-      scout: '💨 SCOUT',
-    };
+    const jobLabels = Object.fromEntries(
+      Object.values(JOBS).map(job => [job.id, `${job.emoji} ${job.label.toUpperCase()}`]),
+    );
     this._jobSwitcherEl.style.display = 'flex';
     this._jobSwitcherEl.innerHTML = `
       <div class="mode-job-title">JOB SWITCHER</div>
