@@ -7,6 +7,9 @@
  */
 
 import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS, JOBS,
+          PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS, ABILITY_RANGE,
+          CAPTURE_RANGE, MAX_CARRY, TRILOCK_DEFENSE_HEAL_BASE, TRILOCK_DEFENSE_HEAL_PER_LEVEL,
+          TRILOCK_DEFENSE_ENERGY_BASE, TRILOCK_DEFENSE_ENERGY_PER_LEVEL } from './entities.js';
          PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS, ABILITY_RANGE,
          CAPTURE_RANGE, MAX_CARRY, JOB_ASSIGNMENT } from './entities.js';
 import { Renderer } from './renderer.js';
@@ -70,6 +73,10 @@ const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
 const MAX_JEWEL_INSET_RATIO = 0.28;
 const BASE_ALERT_RANGE = BASE_RADIUS + 84;
 const BASE_ALERT_COOLDOWN = 5;
+const TRILOCK_DEFENSE_PULSE_RING_RADIUS_MULT = 0.72;
+const TRILOCK_DEFENSE_PULSE_RING_LIFE = 0.55;
+const TRILOCK_DEFENSE_PULSE_RING_GROWTH = 90;
+const TRILOCK_DEFENSE_PULSE_RING_WIDTH = 3;
 const DEATH_MARKER_DURATION = 5;
 const PIN_DURATION = 10;
 const NEXUS_GUARDIAN_INITIAL_SPAWN = 120;
@@ -1098,6 +1105,7 @@ export class Game {
         this.trilocks[0].captureFaction = null;
         this.trilocks[0].captureProgress = 0;
         this.trilocks[0].level = 0;
+        this.trilocks[0].shieldPulseTimer = 0;
         this.trilocks[0].capturePausedTimer = 0;
         this.trilocks[0].scoreDisabledTimer = 0;
         this.trilocks[0].x = cx;
@@ -1161,6 +1169,7 @@ export class Game {
       base.captureProgress = 0;
       base.level = 0;
       base.crystalsStored = 0;
+      base.shieldPulseTimer = 0;
       base.capturePausedTimer = 0;
       base.scoreDisabledTimer = 0;
       base.x = cx;
@@ -2495,6 +2504,7 @@ export class Game {
     // Reset home bases
     for (const base of Object.values(this.bases)) {
       base.crystalsStored = 0;
+      base.shieldPulseTimer = 0;
       base.scoreDisabledTimer = 0;
     }
 
@@ -2505,6 +2515,7 @@ export class Game {
       tl.captureProgress = 0;
       tl.level = 0;
       tl.crystalsStored = 0;
+      tl.shieldPulseTimer = 0;
       tl.capturePausedTimer = 0;
       tl.scoreDisabledTimer = 0;
     }
@@ -2584,6 +2595,26 @@ export class Game {
       if (d < bestD) { bestD = d; best = tl; }
     }
     return best;
+  }
+
+  _emitTriLockShieldPulse(trilock) {
+    if (!trilock?.faction || (trilock.level ?? 0) <= 0) return;
+    const healAmount = TRILOCK_DEFENSE_HEAL_BASE + (trilock.level * TRILOCK_DEFENSE_HEAL_PER_LEVEL);
+    const energyAmount = TRILOCK_DEFENSE_ENERGY_BASE + (trilock.level * TRILOCK_DEFENSE_ENERGY_PER_LEVEL);
+    let affectedAllies = 0;
+    for (const player of this.players) {
+      if (!player.alive || player.faction !== trilock.faction) continue;
+      if (Math.hypot(player.x - trilock.x, player.y - trilock.y) > CAPTURE_RANGE) continue;
+      player.health = Math.min(player.maxHealth, player.health + healAmount);
+      player.energy = Math.min(100, player.energy + energyAmount);
+      affectedAllies++;
+    }
+    if (affectedAllies === 0) return;
+    this.sparks.push(...Particle.ring(trilock.x, trilock.y, FACTIONS[trilock.faction].color, BASE_RADIUS * TRILOCK_DEFENSE_PULSE_RING_RADIUS_MULT, {
+      life: TRILOCK_DEFENSE_PULSE_RING_LIFE,
+      growth: TRILOCK_DEFENSE_PULSE_RING_GROWTH,
+      lineWidth: TRILOCK_DEFENSE_PULSE_RING_WIDTH,
+    }));
   }
 
   _nearestHackableTriLock(x, y, faction) {
@@ -3217,6 +3248,7 @@ export class Game {
           captureProgress: round(base.captureProgress ?? 0),
           captureFaction: base.captureFaction,
           level: base.level ?? 0,
+          shieldPulseTimer: round(base.shieldPulseTimer ?? 0),
           highValue: !!base.highValue,
           highValueMultiplier: base.highValueMultiplier ?? 1,
           scoreDisabledTimer: round(base.scoreDisabledTimer ?? 0),
@@ -3232,6 +3264,7 @@ export class Game {
         captureProgress: round(tl.captureProgress ?? 0),
         captureFaction: tl.captureFaction,
         level: tl.level ?? 0,
+        shieldPulseTimer: round(tl.shieldPulseTimer ?? 0),
         highValue: !!tl.highValue,
         highValueMultiplier: tl.highValueMultiplier ?? 1,
         capturePausedTimer: round(tl.capturePausedTimer ?? 0),
@@ -3760,7 +3793,8 @@ export class Game {
 
   _updateTriLocks(dt) {
     for (const tl of this.trilocks) {
-      tl.update(dt);
+      const shieldPulseTriggered = tl.update(dt);
+      if (shieldPulseTriggered) this._emitTriLockShieldPulse(tl);
 
       // Count alive players inside capture range per faction
       const counts = { blue: 0, green: 0, red: 0 };
