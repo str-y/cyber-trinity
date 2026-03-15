@@ -21,6 +21,17 @@ function withAlpha(hex, a) {
   return `rgba(${r},${g},${b},${a})`;
 }
 
+function drawPolygonPath(ctx, x, y, radius, sides, rotation = 0) {
+  for (let i = 0; i < sides; i += 1) {
+    const angle = rotation + (Math.PI * 2 * i) / sides;
+    const px = x + Math.cos(angle) * radius;
+    const py = y + Math.sin(angle) * radius;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
 const RING_PARTICLE_ALPHA = 0.95;
 const CAMERA_ZOOM_THRESHOLD = 1.001;
 const ZONE_COLLAPSE_NOISE_ANGLE_OFFSET = 0.61;
@@ -703,6 +714,25 @@ export class Renderer {
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (p.shape === 'square') {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation);
+        ctx.fillStyle = `rgba(${r},${g},${b},${Math.min(1, p.alpha)})`;
+        const size = Math.max(0.2, p.size * p.alpha);
+        ctx.fillRect(-size, -size, size * 2, size * 2);
+        ctx.restore();
+      } else if (p.shape === 'line') {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rotation || Math.atan2(p.vy, p.vx));
+        ctx.lineWidth = Math.max(1, p.lineWidth * p.alpha);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, p.alpha)})`;
+        ctx.beginPath();
+        ctx.moveTo(-p.length * 0.5, 0);
+        ctx.lineTo(p.length * 0.5, 0);
+        ctx.stroke();
+        ctx.restore();
       } else {
         ctx.fillStyle   = `rgb(${r},${g},${b})`;
         ctx.beginPath();
@@ -726,21 +756,41 @@ export class Renderer {
       const a   = proj.alpha;
 
       if (proj.type === 'railshot') {
-        // Bright energy bolt with glow trail
-        ctx.shadowBlur  = this.lowQuality ? 8 : 16;
+        const angle = Math.atan2(proj.vy, proj.vx);
+        const length = this.lowQuality ? 28 : 40;
+        // Neon line with bright core
+        ctx.shadowBlur  = this.lowQuality ? 10 : 22;
         ctx.shadowColor = color;
-        ctx.strokeStyle = `rgba(${r},${g},${b},${a})`;
-        ctx.lineWidth   = 3;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, a)})`;
+        ctx.lineWidth   = this.lowQuality ? 4 : 6;
         ctx.beginPath();
-        ctx.moveTo(proj.x, proj.y);
-        ctx.lineTo(proj.x - proj.vx * 0.03, proj.y - proj.vy * 0.03);
+        ctx.moveTo(
+          proj.x - Math.cos(angle) * length * 0.6,
+          proj.y - Math.sin(angle) * length * 0.6,
+        );
+        ctx.lineTo(
+          proj.x + Math.cos(angle) * length * 0.4,
+          proj.y + Math.sin(angle) * length * 0.4,
+        );
+        ctx.stroke();
+        ctx.strokeStyle = `rgba(255,255,255,${a * 0.95})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(
+          proj.x - Math.cos(angle) * length * 0.52,
+          proj.y - Math.sin(angle) * length * 0.52,
+        );
+        ctx.lineTo(
+          proj.x + Math.cos(angle) * length * 0.3,
+          proj.y + Math.sin(angle) * length * 0.3,
+        );
         ctx.stroke();
         ctx.fillStyle = `rgba(255,255,255,${a * 0.9})`;
         ctx.beginPath();
-        ctx.arc(proj.x, proj.y, 3, 0, Math.PI * 2);
+        ctx.arc(proj.x + Math.cos(angle) * 4, proj.y + Math.sin(angle) * 4, 3, 0, Math.PI * 2);
         ctx.fill();
       } else if (proj.type === 'bioshield') {
-        // Expanding/pulsing heal aura circle
+        // Geometric healing grid
         const pulse = 0.5 + 0.3 * Math.sin(this.time * 6);
         ctx.strokeStyle = `rgba(${r},${g},${b},${a * pulse * 0.6})`;
         ctx.lineWidth   = 2;
@@ -755,6 +805,24 @@ export class Renderer {
         grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
         ctx.fillStyle = grad;
         ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.45})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        drawPolygonPath(ctx, proj.x, proj.y, proj.radius * 0.78, 6, this.time * 0.9);
+        ctx.stroke();
+        ctx.beginPath();
+        drawPolygonPath(ctx, proj.x, proj.y, proj.radius * 0.48, 6, -this.time * 0.7);
+        ctx.stroke();
+        ctx.beginPath();
+        for (let i = -1; i <= 1; i += 1) {
+          const offset = i * proj.radius * 0.28;
+          ctx.moveTo(proj.x - proj.radius * 0.42, proj.y + offset);
+          ctx.lineTo(proj.x + proj.radius * 0.42, proj.y + offset);
+          ctx.moveTo(proj.x + offset, proj.y - proj.radius * 0.42);
+          ctx.lineTo(proj.x + offset, proj.y + proj.radius * 0.42);
+        }
+        ctx.stroke();
       } else if (proj.type === 'powerdash') {
         // Blazing charge trail
         ctx.shadowBlur  = this.lowQuality ? 6 : 12;
@@ -770,23 +838,84 @@ export class Renderer {
         ctx.moveTo(proj.x, proj.y);
         ctx.lineTo(proj.x - proj.vx * 0.05, proj.y - proj.vy * 0.05);
         ctx.stroke();
-      } else if (proj.type === 'exploit' || proj.type === 'dataspike' || proj.type === 'systembreach') {
-        const ringRadius = proj.type === 'systembreach' ? proj.radius : 10 + (1 - a) * 10;
+      } else if (proj.type === 'exploit') {
+        const ringRadius = 9 + (1 - a) * 8;
+        ctx.shadowBlur = this.lowQuality ? 8 : 16;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, a * 0.9)})`;
+        ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.16})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, ringRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${a * 0.65})`;
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 3; i += 1) {
+          const orbit = this.time * 3.2 + i * (Math.PI * 2 / 3);
+          const fragX = proj.x + Math.cos(orbit) * (ringRadius + 4);
+          const fragY = proj.y + Math.sin(orbit) * (ringRadius * 0.55 + 3);
+          ctx.save();
+          ctx.translate(fragX, fragY);
+          ctx.rotate(orbit + Math.PI * 0.25);
+          ctx.strokeRect(-3, -3, 6, 6);
+          ctx.restore();
+        }
+        ctx.strokeStyle = `rgba(220,245,255,${Math.max(0.35, a * 0.9)})`;
+        ctx.beginPath();
+        ctx.moveTo(proj.x - ringRadius * 0.8, proj.y - 1);
+        ctx.lineTo(proj.x + ringRadius * 0.8, proj.y - 1);
+        ctx.moveTo(proj.x - ringRadius * 0.45, proj.y + 3);
+        ctx.lineTo(proj.x + ringRadius * 0.55, proj.y + 3);
+        ctx.stroke();
+        ctx.fillStyle = `rgba(220,245,255,${Math.max(0.4, a)})`;
+        ctx.font = 'bold 9px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('</>', proj.x, proj.y);
+      } else if (proj.type === 'dataspike') {
+        const ringRadius = 10 + (1 - a) * 10;
         ctx.shadowBlur = this.lowQuality ? 8 : 16;
         ctx.shadowColor = color;
         ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, a * 0.9)})`;
         ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.22})`;
-        ctx.lineWidth = proj.type === 'systembreach' ? 3 : 2;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(proj.x, proj.y, ringRadius, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
         ctx.shadowBlur = 0;
         ctx.fillStyle = `rgba(220,245,255,${Math.max(0.4, a)})`;
-        ctx.font = proj.type === 'systembreach' ? 'bold 13px "Courier New", monospace' : 'bold 9px "Courier New", monospace';
+        ctx.font = 'bold 9px "Courier New", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(proj.type === 'exploit' ? '</>' : proj.type === 'dataspike' ? 'EMP' : 'SYS', proj.x, proj.y);
+        ctx.fillText('EMP', proj.x, proj.y);
+      } else if (proj.type === 'systembreach') {
+        const glitchOffset = this.lowQuality ? 2 : 4;
+        const ringRadius = proj.radius + Math.sin(this.time * 12) * 2;
+        ctx.shadowBlur = this.lowQuality ? 8 : 18;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = `rgba(${r},${g},${b},${Math.min(1, a * 0.9)})`;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 6]);
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, ringRadius, 0.15, Math.PI * 1.82);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.16})`;
+        ctx.fillRect(proj.x - ringRadius * 0.8, proj.y - 4, ringRadius * 1.55, 2);
+        ctx.fillRect(proj.x - ringRadius * 0.55, proj.y + 5, ringRadius * 1.15, 2);
+        ctx.fillStyle = `rgba(255,80,120,${Math.max(0.2, a * 0.55)})`;
+        ctx.font = 'bold 13px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('SYS', proj.x - glitchOffset, proj.y);
+        ctx.fillStyle = `rgba(120,240,255,${Math.max(0.35, a * 0.7)})`;
+        ctx.fillText('SYS', proj.x + glitchOffset * 0.6, proj.y + 1);
+        ctx.fillStyle = `rgba(230,245,255,${Math.max(0.45, a)})`;
+        ctx.fillText('SYS', proj.x, proj.y);
       }
     }
     ctx.shadowBlur = 0;

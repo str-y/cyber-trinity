@@ -1157,6 +1157,9 @@ export class Particle {
     this.drag = options.drag ?? 0;
     this.growth = options.growth ?? 0;
     this.lineWidth = options.lineWidth ?? 2;
+    this.rotation = options.rotation ?? 0;
+    this.spin = options.spin ?? 0;
+    this.length = options.length ?? size * 2.4;
   }
 
   update(dt) {
@@ -1169,6 +1172,7 @@ export class Particle {
     this.y    += this.vy * dt;
     this.vy   += this.gravity * dt;
     this.size = Math.max(MIN_PARTICLE_SIZE, this.size + this.growth * dt);
+    this.rotation += this.spin * dt;
     this.life -= dt;
     this.alpha = Math.max(0, this.life / this.maxLife);
   }
