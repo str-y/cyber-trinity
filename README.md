@@ -222,9 +222,13 @@ Controls (browser preview):
 
 - Choose your starting faction on the launch screen before deploying.
 - `W/A/S/D` or Arrow keys: move your selected local agent (`YOU`)
+<<<<<<< HEAD
 - `Space`: activate your primary job ability
 - `F`: activate your secondary job ability
 - `R`: activate your ultimate job ability
+=======
+- `Space`: activate job ability (Warrior: Power Slash) when charged
+>>>>>>> main
 - `Esc`: open the settings panel (Game speed, Effect quality, HUD, CRT, agent appearance)
 - `Tab`: lock the nearest enemy and show a direction indicator / target marker
 - `E`: manually drop one carried jewel for tactical hand-offs

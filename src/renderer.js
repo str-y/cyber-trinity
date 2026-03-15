@@ -4,7 +4,11 @@
  * Draws bases, network links, players, crystals, particles, rain, and UI overlays.
  */
 
+<<<<<<< HEAD
 import { FACTIONS, JOBS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+=======
+import { FACTIONS, BASE_RADIUS, PLAYER_RADIUS, CRYSTAL_RADIUS, CAPTURE_RANGE, ABILITY_RANGE } from './entities.js';
+>>>>>>> main
 import { resolveArmorColor, resolveEffectColor } from './customization.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -512,6 +516,7 @@ export class Renderer {
     const trailEffect = player.appearance?.trailEffect ?? 'sparks';
     if (pts.length < 2) return;
     ctx.save();
+<<<<<<< HEAD
     if (player.job === 'hacker') {
       ctx.lineCap = 'square';
       ctx.setLineDash([4, 5]);
@@ -528,6 +533,9 @@ export class Renderer {
       }
       ctx.setLineDash([]);
     } else if (trailEffect === 'data') {
+=======
+    if (trailEffect === 'data') {
+>>>>>>> main
       ctx.fillStyle = withAlpha(col, 0.85);
       for (let i = 1; i < pts.length; i++) {
         const p0 = pts[i - 1], p1 = pts[i];
@@ -665,7 +673,12 @@ export class Renderer {
       ctx.fillText('YOU', 0, -PLAYER_RADIUS - 8);
     }
 
+<<<<<<< HEAD
     const itemLabel = JOBS[player.job]?.emoji ?? '⚔️';
+=======
+    const jobEmoji = { warrior: '⚔️', mage: '🔮', healer: '💚', scout: '💨' };
+    const itemLabel = jobEmoji[player.job] ?? '⚔️';
+>>>>>>> main
     ctx.fillStyle = `rgba(${effectRgb.r},${effectRgb.g},${effectRgb.b},0.85)`;
     ctx.font = 'bold 8px "Courier New", monospace';
     ctx.textAlign = 'center';
