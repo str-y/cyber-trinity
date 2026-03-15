@@ -199,8 +199,11 @@ export const CAPTURE_RANGE    = BASE_RADIUS + 20;   // px — how close you must
 export const CAPTURE_SPEED    = 20;   // progress per second per player inside
 export const CAPTURE_MAX      = 100;  // full capture at this value
 export const TRILOCK_MAX_LEVEL = 3;
+export const TRILOCK_SHIELD_PULSE_BASE_RATE = 1.4;
+export const TRILOCK_SHIELD_PULSE_RATE_PER_LEVEL = 0.35;
 export const TRILOCK_DEFENSE_PULSE_BASE_INTERVAL = 5.2;
 export const TRILOCK_DEFENSE_PULSE_INTERVAL_STEP = 0.7;
+export const TRILOCK_DEFENSE_PULSE_MIN_INTERVAL = 2.6;
 export const TRILOCK_DEFENSE_HEAL_BASE = 3;
 export const TRILOCK_DEFENSE_HEAL_PER_LEVEL = 2;
 export const TRILOCK_DEFENSE_ENERGY_BASE = 6;
@@ -260,7 +263,8 @@ export class Base {
   }
 
   update(dt) {
-    const pulseRate = 1.4 + Math.max(0, this.level - 1) * 0.35;
+    const pulseRate = TRILOCK_SHIELD_PULSE_BASE_RATE +
+      (Math.max(0, this.level - 1) * TRILOCK_SHIELD_PULSE_RATE_PER_LEVEL);
     this.shieldPulse += dt * pulseRate;
     if (this.capturePausedTimer > 0) this.capturePausedTimer = Math.max(0, this.capturePausedTimer - dt);
     if (this.scoreDisabledTimer > 0) this.scoreDisabledTimer = Math.max(0, this.scoreDisabledTimer - dt);
@@ -268,7 +272,10 @@ export class Base {
       this.shieldPulseTimer = 0;
       return false;
     }
-    const pulseInterval = Math.max(2.6, TRILOCK_DEFENSE_PULSE_BASE_INTERVAL - (this.level * TRILOCK_DEFENSE_PULSE_INTERVAL_STEP));
+    const pulseInterval = Math.max(
+      TRILOCK_DEFENSE_PULSE_MIN_INTERVAL,
+      TRILOCK_DEFENSE_PULSE_BASE_INTERVAL - (this.level * TRILOCK_DEFENSE_PULSE_INTERVAL_STEP),
+    );
     this.shieldPulseTimer += dt;
     if (this.shieldPulseTimer < pulseInterval) return false;
     this.shieldPulseTimer -= pulseInterval;
@@ -296,7 +303,7 @@ export class Base {
 
     // Different faction currently has progress → decay first
     if (this.captureFaction && this.captureFaction !== attackFaction) {
-      const levelResistance = 1 + (this.level * 0.75);   // higher-level bases resist faster
+      const levelResistance = 1 + (this.level * 0.75);   // higher-level bases resist more strongly
       this.captureProgress -= CAPTURE_SPEED * count * dt / levelResistance;
       if (this.captureProgress <= 0) {
         // Neutralised

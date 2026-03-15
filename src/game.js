@@ -71,6 +71,10 @@ const SPRINT_ACTIVATION_SPEED_RATIO = 0.55;
 const MAX_JEWEL_INSET_RATIO = 0.28;
 const BASE_ALERT_RANGE = BASE_RADIUS + 84;
 const BASE_ALERT_COOLDOWN = 5;
+const TRILOCK_DEFENSE_PULSE_RING_RADIUS_MULT = 0.72;
+const TRILOCK_DEFENSE_PULSE_RING_LIFE = 0.55;
+const TRILOCK_DEFENSE_PULSE_RING_GROWTH = 90;
+const TRILOCK_DEFENSE_PULSE_RING_WIDTH = 3;
 const DEATH_MARKER_DURATION = 5;
 const PIN_DURATION = 10;
 const NEXUS_GUARDIAN_INITIAL_SPAWN = 120;
@@ -2611,10 +2615,10 @@ export class Game {
       affectedAllies++;
     }
     if (affectedAllies === 0) return;
-    this.sparks.push(...Particle.ring(trilock.x, trilock.y, FACTIONS[trilock.faction].color, BASE_RADIUS * 0.72, {
-      life: 0.55,
-      growth: 90,
-      lineWidth: 3,
+    this.sparks.push(...Particle.ring(trilock.x, trilock.y, FACTIONS[trilock.faction].color, BASE_RADIUS * TRILOCK_DEFENSE_PULSE_RING_RADIUS_MULT, {
+      life: TRILOCK_DEFENSE_PULSE_RING_LIFE,
+      growth: TRILOCK_DEFENSE_PULSE_RING_GROWTH,
+      lineWidth: TRILOCK_DEFENSE_PULSE_RING_WIDTH,
     }));
   }
 
