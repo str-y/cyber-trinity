@@ -179,7 +179,7 @@ export const JOBS = {
 };
 
 /** Per-team job assignment for indices 0–4: 1 Warrior, 1 Mage, 1 Healer, 1 Scout, 1 Hacker */
-const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
+export const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
 
 export const PLAYER_RADIUS = 9;
 export const BASE_RADIUS   = 52;
