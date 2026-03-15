@@ -2053,6 +2053,21 @@ export class Game {
           growth: 80,
           lineWidth: 4,
         }));
+        this.sparks.push(...Particle.burst(proj.targetStructure.x, proj.targetStructure.y, proj.effectColor ?? FACTIONS[proj.faction].color, 16, {
+          speedMin: 45,
+          speedMax: 140,
+          lifeMin: 0.2,
+          lifeMax: 0.55,
+          sizeMin: 2,
+          sizeMax: 5,
+          gravity: 0,
+          drag: 3.5,
+          shape: 'line',
+          length: BASE_RADIUS * 0.38,
+          lineWidth: 2,
+          angleOffset: -0.25,
+          spread: 0.5,
+        }));
         proj.hit = true;
         continue;
       }
@@ -2071,6 +2086,18 @@ export class Game {
               growth: 45,
               lineWidth: 2,
             }));
+            this.sparks.push(...Particle.burst(p.x, p.y, proj.effectColor ?? FACTIONS[proj.faction].color, 10, {
+              speedMin: 28,
+              speedMax: 120,
+              lifeMin: 0.25,
+              lifeMax: 0.55,
+              sizeMin: 2,
+              sizeMax: 4.5,
+              gravity: -4,
+              drag: 2.4,
+              shape: 'square',
+              spin: 4,
+            }));
             proj.hit = true;
             break;
           }
@@ -2079,7 +2106,26 @@ export class Game {
           p.markCombat(this.elapsed);
           p.health -= proj.damage;
           this._spawnDamageNumber(p.x, p.y - 14, Math.round(proj.damage), FACTIONS[proj.faction].color);
-          this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
+          if (proj.type === 'railshot') {
+            const angle = Math.atan2(proj.vy, proj.vx);
+            this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 10, {
+              speedMin: 60,
+              speedMax: 180,
+              lifeMin: 0.18,
+              lifeMax: 0.4,
+              sizeMin: 2,
+              sizeMax: 4,
+              gravity: 0,
+              drag: 4,
+              shape: 'line',
+              length: 18,
+              lineWidth: 2,
+              angleOffset: angle - 0.14,
+              spread: 0.28,
+            }));
+          } else {
+            this.sparks.push(...Particle.burst(p.x, p.y, FACTIONS[proj.faction].color, 8));
+          }
           if (p.health <= 0) {
             this._recordElimination(p, proj.owner ?? proj.faction, 'ability KO');
           }
