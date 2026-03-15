@@ -198,11 +198,7 @@ function createFactionStats() {
   };
 }
 
-<<<<<<< HEAD
 const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
-=======
-const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout'];
->>>>>>> main
 const JOB_SWITCH_SHORTCUTS = {
   Digit1: 'warrior',
   Digit2: 'mage',
@@ -2067,7 +2063,6 @@ export class Game {
         if (this._isAlly(proj.faction, p.faction)) continue;   // skip allied faction
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
-<<<<<<< HEAD
           if (proj.type === 'exploit') {
             p.abilitySealTimer = Math.max(p.abilitySealTimer ?? 0, proj.effectDuration || 3);
             if (proj.owner) proj.owner.hackLinkTimer = Math.max(proj.owner.hackLinkTimer ?? 0, proj.effectDuration || 3);
@@ -2079,8 +2074,6 @@ export class Game {
             proj.hit = true;
             break;
           }
-=======
->>>>>>> main
           this._registerDamage(p, proj.owner ?? proj.faction);
           proj.owner?.markCombat(this.elapsed);
           p.markCombat(this.elapsed);
