@@ -5,7 +5,7 @@
  * jewel counter, TriLock status, hate indicator.
  */
 
-import { FACTIONS, JOBS } from './entities.js';
+import { FACTIONS, JOBS, JOB_ASSIGNMENT } from './entities.js';
 
 const MAX_FEED_ITEMS = 6;
 const FEED_TTL       = 3500; // ms
@@ -1056,11 +1056,15 @@ export class HUD {
     this._jobSwitcherEl.innerHTML = `
       <div class="mode-job-title">JOB SWITCHER</div>
       <div class="mode-job-buttons">
-        ${Object.entries(jobLabels).map(([job, label], index) => `
-          <button type="button" class="mode-job-btn${currentJob === job ? ' active' : ''}" data-job="${job}">
-            <span>${label}</span><span class="mode-job-shortcut">${index + 1}</span>
-          </button>
-        `).join('')}
+        ${JOB_ASSIGNMENT.map((jobId, index) => {
+          const label = jobLabels[jobId];
+          if (!label) return '';
+          return `
+            <button type="button" class="mode-job-btn${currentJob === jobId ? ' active' : ''}" data-job="${jobId}">
+              <span>${label}</span><span class="mode-job-shortcut">${index + 1}</span>
+            </button>
+          `;
+        }).join('')}
       </div>
     `;
   }
