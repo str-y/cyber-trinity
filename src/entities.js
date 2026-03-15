@@ -179,7 +179,7 @@ export const JOBS = {
 };
 
 /** Per-team job assignment for indices 0–4: 1 Warrior, 1 Mage, 1 Healer, 1 Scout, 1 Hacker */
-const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
+export const JOB_ASSIGNMENT = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
 
 export const PLAYER_RADIUS = 9;
 export const BASE_RADIUS   = 52;
@@ -381,16 +381,8 @@ export class Player {
     this.cooldown = 0;
     this.cooldown2 = 0;
     this.ultCooldown = 0;
-<<<<<<< HEAD
     this.abilitySealTimer = 0;
     this.hackLinkTimer = 0;
-=======
-
-    // AI role based on job: healers/scouts → collector, warriors → fighter, mage index-based
-    if (jobId === 'scout' || jobId === 'healer') this.role = 'collector';
-    else if (index === 4) this.role = 'defender';
-    else this.role = 'fighter';
->>>>>>> main
 
     this.stats = createPlayerStats();
     this.sessionStats = createPlayerStats();
@@ -583,10 +575,7 @@ export class Player {
       switch (this.role) {
         case 'collector': this._aiCollector(world, homeBase, aiProfile); break;
         case 'fighter':   this._aiFighter(world, homeBase, leadFaction, aiProfile); break;
-<<<<<<< HEAD
         case 'controller': this._aiController(world, homeBase, leadFaction, aiProfile); break;
-=======
->>>>>>> main
         case 'defender':  this._aiDefender(world, homeBase); break;
       }
     }
@@ -620,11 +609,7 @@ export class Player {
       const enemy = world._nearestEnemy(this.x, this.y, this.faction);
       if (enemy && dist(this.x, this.y, enemy.x, enemy.y) < 80) {
         this.attackTimer = 0.6;
-<<<<<<< HEAD
         const baseDmg = this.jobDef?.meleeDamage ?? 10;
-=======
-        const baseDmg = this.job === 'warrior' ? 22 : this.job === 'mage' ? 18 : this.job === 'scout' ? 15 : 10;
->>>>>>> main
         const dmgMult = (world.factionBuffs?.[this.faction]?.damageMult ?? 1) *
           (world._getMomentumDamageMultiplier?.(this) ?? 1);
         const dmg = baseDmg * dmgMult;
@@ -948,17 +933,10 @@ export class Player {
     return this._trySkill(world, 'primary');
   }
 
-<<<<<<< HEAD
   trySecondaryAbility(world) {
     if (this.job !== 'hacker') return null;
     return this._trySkill(world, 'secondary');
   }
-=======
-    const aiProfile = this.isPlayerControlled ? null : (this.aiProfile ?? {});
-    const enemy = world._nearestEnemy(this.x, this.y, this.faction);
-    const abilityRange = ABILITY_RANGE * (aiProfile?.abilityRangeMult ?? 1);
-    if (!enemy || dist(this.x, this.y, enemy.x, enemy.y) > abilityRange) return null;
->>>>>>> main
 
   tryUltimate(world) {
     if (this.job !== 'hacker') return null;
@@ -1005,20 +983,14 @@ export class Player {
       ))
       : 0;
     const cooldownMult = world._getAbilityCooldownMultiplier?.() ?? 1;
-<<<<<<< HEAD
     this[cooldownKey] = Math.max(0, cooldownMax * cooldownMult - cooldownReduction);
     if (slot === 'primary' && world._consumeInstantCooldownReset?.(this)) this[cooldownKey] = 0;
-=======
-    this.cooldown = Math.max(0, this.abilityMax * cooldownMult - cooldownReduction);
-    if (world._consumeInstantCooldownReset?.(this)) this.cooldown = 0;
->>>>>>> main
     if (this.passive?.id === 'overclock' && this.passiveState) {
       this.passiveState.overclockStacks = 0;
     }
     this.markCombat(world.elapsed ?? 0);
     world._recordAbilityUse(this);
 
-<<<<<<< HEAD
     if (skill.type === 'dataspike') this.hackLinkTimer = Math.max(this.hackLinkTimer, 4);
     else if (skill.type === 'systembreach') this.hackLinkTimer = Math.max(this.hackLinkTimer, 10);
 
@@ -1043,16 +1015,10 @@ export class Player {
     let aimX = enemy.x;
     let aimY = enemy.y;
     if (slot === 'primary' && aiProfile?.aimLead && Number.isFinite(enemy.vx) && Number.isFinite(enemy.vy)) {
-=======
-    let aimX = enemy.x;
-    let aimY = enemy.y;
-    if (aiProfile?.aimLead && Number.isFinite(enemy.vx) && Number.isFinite(enemy.vy)) {
->>>>>>> main
       const lead = aiProfile.aimLead * (enemy.isPlayerControlled ? PLAYER_AIM_LEAD_MULTIPLIER : 1);
       aimX += enemy.vx * lead;
       aimY += enemy.vy * lead;
     }
-<<<<<<< HEAD
     if (slot === 'primary' && aiProfile?.aimJitter) {
       aimX += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
       aimY += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
@@ -1063,32 +1029,16 @@ export class Player {
   _createSkillProjectile(skill, target, world) {
     const dx = target.x - this.x;
     const dy = target.y - this.y;
-=======
-    if (aiProfile?.aimJitter) {
-      aimX += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
-      aimY += randRange(-aiProfile.aimJitter, aiProfile.aimJitter);
-    }
-    const dx = aimX - this.x;
-    const dy = aimY - this.y;
->>>>>>> main
     const [nx, ny] = normalise(dx, dy);
     const damageMult = world._getMomentumDamageMultiplier?.(this) ?? 1;
     let proj;
-    const damageMult = world._getMomentumDamageMultiplier?.(this) ?? 1;
     switch (skill.type) {
-<<<<<<< HEAD
       case 'railshot':
         proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage * damageMult);
-=======
-      case 'railshot': {
-        proj = new Projectile(this.x, this.y, nx * 420, ny * 420, this.faction, 'railshot', skill.damage * damageMult);
-        proj.owner = this;
->>>>>>> main
         break;
       case 'bioshield':
         proj = new Projectile(this.x, this.y, 0, 0, this.faction, 'bioshield', 0);
         break;
-<<<<<<< HEAD
       case 'powerdash':
         proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage * damageMult);
         break;
@@ -1117,17 +1067,6 @@ export class Player {
         break;
       default:
         proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage * damageMult);
-=======
-      }
-      case 'powerdash': {
-        proj = new Projectile(this.x, this.y, nx * 280, ny * 280, this.faction, 'powerdash', skill.damage * damageMult);
-        proj.owner = this;
-        break;
-      }
-      default: {
-        proj = new Projectile(this.x, this.y, nx * 350, ny * 350, this.faction, skill.type, skill.damage * damageMult);
-        proj.owner = this;
->>>>>>> main
         break;
     }
     proj.owner = this;

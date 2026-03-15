@@ -10,6 +10,8 @@ import { Base, Player, MemoryCrystal, Particle, RainDrop, Projectile, FACTIONS, 
           PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS, ABILITY_RANGE,
           CAPTURE_RANGE, MAX_CARRY, TRILOCK_DEFENSE_HEAL_BASE, TRILOCK_DEFENSE_HEAL_PER_LEVEL,
           TRILOCK_DEFENSE_ENERGY_BASE, TRILOCK_DEFENSE_ENERGY_PER_LEVEL } from './entities.js';
+         PLAYER_RADIUS, CRYSTAL_RADIUS, BASE_RADIUS, JEWEL_TIERS, ABILITY_RANGE,
+         CAPTURE_RANGE, MAX_CARRY, JOB_ASSIGNMENT } from './entities.js';
 import { Renderer } from './renderer.js';
 import { HUD } from './hud.js';
 import { AudioEngine } from './audio.js';
@@ -203,11 +205,7 @@ function createFactionStats() {
   };
 }
 
-<<<<<<< HEAD
-const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout', 'hacker'];
-=======
-const SANDBOX_JOB_ORDER = ['warrior', 'mage', 'healer', 'scout'];
->>>>>>> main
+const SANDBOX_JOB_ORDER = JOB_ASSIGNMENT;
 const JOB_SWITCH_SHORTCUTS = {
   Digit1: 'warrior',
   Digit2: 'mage',
@@ -2074,7 +2072,6 @@ export class Game {
         if (this._isAlly(proj.faction, p.faction)) continue;   // skip allied faction
         const dx = p.x - proj.x, dy = p.y - proj.y;
         if (Math.sqrt(dx * dx + dy * dy) < p.radius + proj.radius + PROJECTILE_HIT_TOLERANCE) {
-<<<<<<< HEAD
           if (proj.type === 'exploit') {
             p.abilitySealTimer = Math.max(p.abilitySealTimer ?? 0, proj.effectDuration || 3);
             if (proj.owner) proj.owner.hackLinkTimer = Math.max(proj.owner.hackLinkTimer ?? 0, proj.effectDuration || 3);
@@ -2086,8 +2083,6 @@ export class Game {
             proj.hit = true;
             break;
           }
-=======
->>>>>>> main
           this._registerDamage(p, proj.owner ?? proj.faction);
           proj.owner?.markCombat(this.elapsed);
           p.markCombat(this.elapsed);
